@@ -12,12 +12,12 @@ return [
     'allowed_methods' => ['*'],
 
     // Cambiar '*' por el origen exacto de tu frontend
-    'allowed_origins' => [
-        env('FRONTEND_URL', 'http://localhost:3000'),
-    ],
-
-    // Si usas subdominios / múltiples orígenes, lista explícita:
-    // 'allowed_origins' => ['http://localhost:3000', 'http://127.0.0.1:3000'],
+    'allowed_origins' => array_filter(array_merge([
+        'http://localhost:19006',
+        'http://127.0.0.1:19006',
+        'http://localhost:8081',
+        'http://127.0.0.1:8081',
+    ], [env('FRONTEND_URL')])),
 
     'allowed_origins_patterns' => [],
 

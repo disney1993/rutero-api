@@ -1,61 +1,102 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Rutero API
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+API en Laravel para **Rutero**, una aplicación pensada para propietarios de vehículos y conductores que gestionan rutas de transporte de clientes (traslados, taxis privados, viajes concertados, etc.).
 
-## About Laravel
+## ¿Qué hace Rutero?
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- Un **propietario** (`owner`) registra sus vehículos y planifica rutas: cliente, origen, destino, fecha/hora, precio estimado (calculado a partir de la distancia y un precio por km configurable) y estado (pendiente, completada, rechazada, cancelada).
+- El propietario genera un **código mensual** que comparte con las personas que conducen para él; al unirse con ese código, un **conductor** (`driver`) puede ver y crear rutas asociadas a ese propietario, actualizar su estado y el precio final, sin poder ver los informes de ingresos del propietario.
+- Un **administrador** (`admin`) tiene visibilidad y gestión completa de usuarios y rutas de toda la plataforma (panel de administración, búsqueda de usuarios, edición de rol/plan, borrado de cuentas).
+- La distancia entre origen y destino se calcula automáticamente por carretera (OSRM) a partir del autocompletado de direcciones (Nominatim), y sirve para sugerir el precio de cada ruta.
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+Este repositorio es el backend (API REST con Sanctum para autenticación). El cliente móvil/web está en [`rutero-react`](../rutero-react).
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## Requisitos
 
-## Learning Laravel
+- PHP 8.4+ (en este entorno: `C:\tools\php85\php.exe`, **no** el PHP 8.3 incluido con Laragon)
+- Composer
+- MySQL (Laragon lo incluye)
+- Node.js + npm (solo para compilar assets con Vite)
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+## Instalación
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+```powershell
+cd c:\laragon\www\rutero-api
+composer install
+npm install
+copy .env.example .env
+C:\tools\php85\php.exe artisan key:generate
+```
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+Configura la base de datos en `.env` (por defecto `DB_DATABASE=backend_api`, usuario `root` sin contraseña en Laragon):
 
-## Laravel Sponsors
+```env
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=backend_api
+DB_USERNAME=root
+DB_PASSWORD=
+```
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+Ejecuta las migraciones y, opcionalmente, siembra datos de demostración (usuarios, vehículos y rutas de ejemplo):
 
-### Premium Partners
+```powershell
+C:\tools\php85\php.exe artisan migrate --force
+C:\tools\php85\php.exe artisan db:seed
+```
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+El seeder crea un `admin`, un `owner` y un `driver` de ejemplo (`admin@example.test` / `owner@example.test` / `driver@example.test`, contraseña `secret123`), además de decenas de usuarios, vehículos y rutas aleatorias para poder probar listados, calendario e informes con volumen de datos realista.
 
-## Contributing
+## Ejecutar la API
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```powershell
+cd c:\laragon\www\rutero-api
+C:\tools\php85\php.exe artisan serve --host=127.0.0.1 --port=8000
+```
 
-## Code of Conduct
+- API: http://127.0.0.1:8000
+- Health check: http://127.0.0.1:8000/api/health
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+## Ejecutar el frontend (rutero-react)
 
-## Security Vulnerabilities
+Con la API anterior corriendo, en otra terminal:
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+```powershell
+cd c:\laragon\www\rutero-react
+npm install
+npm run web
+```
 
-## License
+Más detalles (Expo Go, Android/iOS, configuración de Google Sign-In) en [`rutero-react/README.md`](../rutero-react/README.md).
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+## Ejecutar los tests
+
+```powershell
+cd c:\laragon\www\rutero-api
+C:\tools\php85\php.exe artisan test
+```
+
+## Autenticación y roles
+
+Registro/login por email o Google (`id_token`). Roles disponibles:
+
+- `admin`: ve y gestiona todos los usuarios y rutas.
+- `owner` (propietario): crea rutas, genera un `owner_code` mensual para compartir con conductores, gestiona sus vehículos y rutas.
+- `driver` (conductor): al registrarse puede indicar un `owner_code` para asociarse a un propietario; puede crear rutas, marcarlas como completadas/canceladas/rechazadas y actualizar `final_price` y `payment_method`, pero no puede borrar rutas que no creó él mismo.
+
+## Endpoints principales
+
+- `POST /api/register` — Registro con `first_name`, `last_name`, `email`, `password`. Opcional `role` (`admin|owner|driver`) y `owner_code` si `role=driver`.
+- `POST /api/login` — Login con `email` y `password`.
+- `POST /api/auth/google/mobile` — Envía `id_token` de Google; el backend lo verifica y devuelve `access_token`.
+- `GET /api/user` — Usuario autenticado (token Sanctum).
+- `GET|POST|PUT|DELETE /api/rutas` — Gestión de rutas. Filtrado por rol: el admin ve todo, el owner ve las suyas, el driver ve las del propietario al que está asociado y las que él mismo creó.
+- `GET|POST|PUT|DELETE /api/vehicles` — Gestión de vehículos del propietario. No se puede borrar un vehículo con rutas asociadas.
+- `POST /api/owner/codes` / `POST /api/driver/join-code` — Generar y canjear el código mensual que asocia conductores a un propietario.
+- `GET /api/admin/*` — Panel de administración (solo `admin`): búsqueda/edición/borrado de usuarios e informes agregados.
+
+## Notas
+
+- Si usas Laragon, asegúrate de que MySQL (y Apache, si usas virtual hosts) estén arrancados antes de iniciar la API.
+- La tabla `rutas` se llamó originalmente `trips`; algunas columnas internas (`trip_date`, `trip_time`, etc.) conservan ese nombre histórico y no afectan a la API pública.
