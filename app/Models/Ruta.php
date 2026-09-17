@@ -15,6 +15,7 @@ class Ruta extends Model
         'owner_id',
         'driver_id',
         'created_by',
+        'completed_by',
         'vehicle_id',
         'client_name',
         'client_phone',
@@ -45,6 +46,14 @@ class Ruta extends Model
     public function driver()
     {
         return $this->belongsTo(\App\Models\User::class, 'driver_id');
+    }
+
+    // Nombrada "completer" (no "completedBy") porque una relación camelCase
+    // se serializa como "completed_by" en JSON, lo que chocaría con la
+    // columna cruda del mismo nombre.
+    public function completer()
+    {
+        return $this->belongsTo(\App\Models\User::class, 'completed_by');
     }
 
     protected $casts = [

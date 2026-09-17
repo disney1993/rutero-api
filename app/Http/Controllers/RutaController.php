@@ -16,10 +16,11 @@ class RutaController extends Controller
             'date_from' => 'sometimes|date',
             'date_to' => 'sometimes|date|after_or_equal:date_from',
             'user_id' => 'sometimes|integer',
+            'search' => 'sometimes|string|max:255',
         ]);
 
         $user = $request->user();
-        $query = Ruta::query();
+        $query = Ruta::query()->with('completer:id,first_name,last_name');
 
         // Authorization: admin sees all, everyone else sees rutas they own or drive.
         if ($user && ! $user->isAdmin()) {
@@ -51,6 +52,12 @@ class RutaController extends Controller
             $query->whereDate('trip_date', $request->date);
         } elseif ($request->filled('date_from') && $request->filled('date_to')) {
             $query->whereBetween('trip_date', [$request->date_from, $request->date_to]);
+        }
+
+        // Búsqueda por nombre de cliente, p.ej. para encontrar una ruta
+        // concreta desde "Jornada" sin navegar día a día.
+        if ($request->filled('search')) {
+            $query->where('client_name', 'like', '%' . $request->input('search') . '%');
         }
 
         $rutas = $query->orderBy('trip_date', 'desc')->orderBy('trip_time', 'asc')->get();
@@ -217,6 +224,14 @@ class RutaController extends Controller
             if (isset($validated['status']) && !in_array($validated['status'], ['cancelled', 'completed', 'pending', 'rejected'])) {
                 unset($validated['status']);
             }
+        }
+
+        // Se registra quién completó la ruta solo en la transición hacia
+        // "completed", no en cada edición posterior mientras siga así. Va
+        // después del filtrado de campos por rol para que sobreviva incluso
+        // cuando quien actualiza es el conductor (el caso más común).
+        if ($user && ($validated['status'] ?? null) === 'completed' && $ruta->status !== 'completed') {
+            $validated['completed_by'] = $user->id;
         }
 
         $ruta->update($validated);

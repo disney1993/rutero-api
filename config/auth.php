@@ -13,8 +13,14 @@ return [
     |
     */
 
+    // Esta API es 100% por token (Sanctum), no hay login por sesión: el guard
+    // por defecto debe ser "sanctum" para que $request->user() reconozca el
+    // Bearer token también en rutas públicas (p.ej. POST /rutas) que no llevan
+    // el middleware auth:sanctum. Con "web" como default, un usuario con
+    // sesión iniciada que crea una ruta ahí quedaba tratado como anónimo y la
+    // ruta se guardaba sin owner_id/driver_id.
     'defaults' => [
-        'guard' => env('AUTH_GUARD', 'web'),
+        'guard' => env('AUTH_GUARD', 'sanctum'),
         'passwords' => env('AUTH_PASSWORD_BROKER', 'users'),
     ],
 

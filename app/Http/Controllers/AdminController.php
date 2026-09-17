@@ -30,6 +30,8 @@ class AdminController extends Controller
             $users = $users->filter(fn (User $user) => $user->hasOwnerCapability())->values();
         } elseif ($request->input('type') === 'driver') {
             $users = $users->filter(fn (User $user) => $user->hasDriverCapability())->values();
+        } elseif ($request->input('type') === 'incomplete') {
+            $users = $users->filter(fn (User $user) => $user->hasIncompleteProfile())->values();
         }
 
         return response()->json($users);

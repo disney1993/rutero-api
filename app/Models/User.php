@@ -41,6 +41,7 @@ class User extends Authenticatable
         'has_driver_capability',
         'is_admin',
         'is_premium',
+        'profile_incomplete',
     ];
 
     /**
@@ -105,6 +106,14 @@ class User extends Authenticatable
             && (! $this->premium_expires_at || $this->premium_expires_at->isFuture());
     }
 
+    // Los logins con Google pueden crear el usuario sin nombre/apellido si
+    // Google no los devuelve; esto permite detectarlo y forzar completar el
+    // perfil antes de dejar usar el resto de la app.
+    public function hasIncompleteProfile(): bool
+    {
+        return blank($this->first_name) || blank($this->last_name);
+    }
+
     public function getHasOwnerCapabilityAttribute(): bool
     {
         return $this->hasOwnerCapability();
@@ -123,5 +132,10 @@ class User extends Authenticatable
     public function getIsPremiumAttribute(): bool
     {
         return $this->isPremium();
+    }
+
+    public function getProfileIncompleteAttribute(): bool
+    {
+        return $this->hasIncompleteProfile();
     }
 }

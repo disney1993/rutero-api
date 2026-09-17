@@ -31,6 +31,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/user/password', [AuthController::class, 'updatePassword']);
     Route::patch('/user/avatar-color', [AuthController::class, 'updateAvatarColor']);
     Route::patch('/user/preferences', [AuthController::class, 'updatePreferences']);
+    // Resumen de actividad propio; un admin puede pedir el de otro con ?user_id=.
+    Route::get('/reports/user-summary', [\App\Http\Controllers\ReportController::class, 'userSummary']);
     Route::get('/geocode/search', [\App\Http\Controllers\GeocodingController::class, 'search']);
     Route::get('/geocode/distance', [\App\Http\Controllers\GeocodingController::class, 'distance']);
     // Protected ruta actions: show, update, destroy
