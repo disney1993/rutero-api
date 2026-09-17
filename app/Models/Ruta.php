@@ -60,4 +60,11 @@ class Ruta extends Model
         'trip_date' => 'date',
         'hidden' => 'boolean',
     ];
+
+    // La columna es TIME en MySQL y siempre guarda/devuelve segundos
+    // ("14:30:00"); la app solo necesita horas y minutos.
+    public function getTripTimeAttribute(?string $value): ?string
+    {
+        return $value ? substr($value, 0, 5) : $value;
+    }
 }

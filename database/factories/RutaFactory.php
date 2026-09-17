@@ -57,7 +57,7 @@ class RutaFactory extends Factory
         $estimatedPrice = round($distanceKm * $pricePerKm, 2);
 
         $status = $this->faker->randomElement([
-            'completed', 'completed', 'completed', 'pending', 'pending', 'cancelled', 'rejected',
+            'completed', 'completed', 'completed', 'pending', 'pending', 'cancelled',
         ]);
 
         return [

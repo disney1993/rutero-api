@@ -11,7 +11,7 @@ class RutaController extends Controller
     public function index(Request $request): JsonResponse
     {
         $request->validate([
-            'status' => 'sometimes|in:pending,completed,rejected,cancelled',
+            'status' => 'sometimes|in:pending,completed,cancelled',
             'date' => 'sometimes|date',
             'date_from' => 'sometimes|date',
             'date_to' => 'sometimes|date|after_or_equal:date_from',
@@ -88,7 +88,7 @@ class RutaController extends Controller
             'passenger_count' => 'nullable|integer|min:1|max:20',
             'trip_date' => 'nullable|date',
             'trip_time' => 'nullable|date_format:H:i',
-            'status' => 'nullable|in:pending,completed,rejected,cancelled',
+            'status' => 'nullable|in:pending,completed,cancelled',
             'hidden' => 'nullable|boolean',
             'notes' => 'nullable|string|max:2000',
             'owner_id' => 'nullable|integer|exists:users,id',
@@ -109,6 +109,8 @@ class RutaController extends Controller
         $requestedDriverId = $validated['driver_id'] ?? null;
         unset($validated['owner_id'], $validated['driver_id']);
 
+        $drivingForAnotherOwner = false;
+
         if ($user) {
             if ($user->isAdmin()) {
                 // Admin creates on behalf of whichever owner (and optionally driver) is given.
@@ -128,6 +130,7 @@ class RutaController extends Controller
                     return response()->json(['message' => 'No estás unido al código de este propietario este mes'], 403);
                 }
 
+                $drivingForAnotherOwner = true;
                 $validated['owner_id'] = $requestedOwnerId;
                 $validated['driver_id'] = $user->id;
             } else {
@@ -137,6 +140,13 @@ class RutaController extends Controller
                 }
                 $validated['owner_id'] = $user->id;
             }
+        }
+
+        // El vehículo es obligatorio, salvo cuando quien crea la ruta conduce
+        // para un propietario ajeno (código de mes): no tiene visibilidad de
+        // esa flota, así que no se le puede exigir elegir uno.
+        if (empty($validated['vehicle_id']) && ! $drivingForAnotherOwner) {
+            return response()->json(['message' => 'Selecciona un vehículo'], 422);
         }
 
         // If vehicle_id provided, ensure it belongs to the resolved owner's fleet.
@@ -202,7 +212,7 @@ class RutaController extends Controller
             'passenger_count' => 'sometimes|nullable|integer|min:1|max:20',
             'trip_date' => 'sometimes|nullable|date',
             'trip_time' => 'sometimes|nullable|date_format:H:i',
-            'status' => 'sometimes|in:pending,completed,rejected,cancelled',
+            'status' => 'sometimes|in:pending,completed,cancelled',
             'notes' => 'sometimes|nullable|string|max:2000',
         ]);
 
@@ -221,7 +231,7 @@ class RutaController extends Controller
         if (! $isOwner) {
             $allowed = ['final_price', 'payment_method', 'status', 'notes'];
             $validated = array_intersect_key($validated, array_flip($allowed));
-            if (isset($validated['status']) && !in_array($validated['status'], ['cancelled', 'completed', 'pending', 'rejected'])) {
+            if (isset($validated['status']) && !in_array($validated['status'], ['cancelled', 'completed', 'pending'])) {
                 unset($validated['status']);
             }
         }

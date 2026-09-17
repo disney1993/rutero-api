@@ -20,7 +20,13 @@ class Vehicle extends Model
         'seats',
         'vehicle_type',
         'active',
+        'is_default',
         'notes',
+    ];
+
+    protected $casts = [
+        'active' => 'boolean',
+        'is_default' => 'boolean',
     ];
 
     public function owner()
