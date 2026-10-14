@@ -40,6 +40,10 @@ class RutaController extends Controller
         }
 
         if ($request->filled('status')) {
+            // Cancelado = borrado blando: sin withTrashed no aparecería ninguno.
+            if ($request->status === 'cancelled') {
+                $query->withTrashed();
+            }
             $query->where('status', $request->status);
         }
 

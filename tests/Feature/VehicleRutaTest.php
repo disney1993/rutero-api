@@ -145,6 +145,7 @@ class VehicleRutaTest extends TestCase
         $listed = $this->withHeaders($auth)->getJson("/api/rutas?{$range}&with_deleted=1")->json('data');
         $this->assertCount(1, $listed);
         $this->assertNotNull($listed[0]['deleted_at']);
+        $this->assertCount(1, $this->withHeaders($auth)->getJson("/api/rutas?{$range}&status=cancelled")->json('data'));
 
         // Sigue contando para el vehículo: no se puede borrar (la FK lo impediría).
         $this->withHeaders($auth)->deleteJson("/api/vehicles/{$vehicleId}")->assertStatus(422);
