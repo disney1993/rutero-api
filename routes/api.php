@@ -24,6 +24,9 @@ Route::apiResource('rutas', RutaController::class)->only(['index','store']);
 Route::get('/car-catalog/makes', [\App\Http\Controllers\CarCatalogController::class, 'makes']);
 Route::get('/car-catalog/models', [\App\Http\Controllers\CarCatalogController::class, 'models']);
 
+// Tarifas interurbanas de taxi por comunidad autónoma (referencia para el precio/km)
+Route::get('/reference/taxi-tariffs', [\App\Http\Controllers\TaxiTariffController::class, 'index']);
+
 // Rutas protegidas con Sanctum (owner/driver/admin)
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', [AuthController::class, 'userProfile']);
@@ -37,6 +40,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/geocode/distance', [\App\Http\Controllers\GeocodingController::class, 'distance']);
     // Protected ruta actions: show, update, destroy
     Route::apiResource('rutas', RutaController::class)->except(['index','store']);
+    // Marcar como revisado un cierre automático ("Por revisar" → "Correcto")
+    Route::post('/rutas/{ruta}/review', [RutaController::class, 'review']);
+    // Restaurar un viaje eliminado (borrado blando)
+    Route::post('/rutas/{ruta}/restore', [RutaController::class, 'restore'])->withTrashed();
     // Vehicles CRUD
     Route::apiResource('vehicles', \App\Http\Controllers\VehicleController::class);
 

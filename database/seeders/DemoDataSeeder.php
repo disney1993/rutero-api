@@ -51,7 +51,8 @@ class DemoDataSeeder extends Seeder
             $vehicles = Vehicle::factory()->count(rand(1, 3))->create(['owner_id' => $user->id]);
 
             for ($i = 0; $i < rand(8, 15); $i++) {
-                Ruta::factory()->create([
+                // ~1 de cada 6 cancelado (cancelado = eliminado con borrado blando).
+                (rand(1, 6) === 1 ? Ruta::factory()->cancelled() : Ruta::factory())->create([
                     'owner_id' => $user->id,
                     'created_by' => $user->id,
                     'vehicle_id' => $vehicles->random()->id,

@@ -79,7 +79,7 @@ class AdminUserManagementTest extends TestCase
 
         $this->app['auth']->forgetGuards();
         $this->withHeader('Authorization', "Bearer $ownerToken")
-            ->postJson('/api/vehicles', ['plate' => 'DEL-001'])->assertStatus(201);
+            ->postJson('/api/vehicles', ['make' => 'Seat', 'model' => 'Ibiza', 'color' => 'Blanco', 'year' => 2020, 'seats' => 5, 'plate' => 'DEL-001', 'vehicle_type' => 'sedan'])->assertStatus(201);
         $this->withHeader('Authorization', "Bearer $ownerToken")
             ->postJson('/api/rutas', ['client_name' => 'Cliente', 'origin' => 'Origen', 'destination' => 'Destino'])
             ->assertStatus(201);
@@ -120,7 +120,7 @@ class AdminUserManagementTest extends TestCase
         [$driverToken, $driverId] = $this->registerAndToken(['email' => 'driver3@example.test']);
 
         $this->app['auth']->forgetGuards();
-        $this->withHeader('Authorization', "Bearer $ownerToken")->postJson('/api/vehicles', ['plate' => 'DRV-001'])->assertStatus(201);
+        $this->withHeader('Authorization', "Bearer $ownerToken")->postJson('/api/vehicles', ['make' => 'Seat', 'model' => 'Ibiza', 'color' => 'Blanco', 'year' => 2020, 'seats' => 5, 'plate' => 'DRV-001', 'vehicle_type' => 'sedan'])->assertStatus(201);
         $month = date('Y-m');
         $code = $this->withHeader('Authorization', "Bearer $ownerToken")
             ->postJson('/api/owner/codes', ['month' => $month])->json('code');

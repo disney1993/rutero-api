@@ -31,10 +31,11 @@ class ReportController extends Controller
         return response()->json([
             'user' => $target->only(['id', 'first_name', 'last_name', 'email', 'avatar_color']),
             'vehicles_total' => $target->vehicles()->count(),
-            'rutas_total' => (clone $rutasQuery)->count(),
+            // Los cancelados son viajes con borrado blando: se cuentan igualmente.
+            'rutas_total' => (clone $rutasQuery)->withTrashed()->count(),
             'has_owner_capability' => $target->hasOwnerCapability(),
             'has_driver_capability' => $target->hasDriverCapability(),
-            'rutas_by_status' => (clone $rutasQuery)->selectRaw('status, count(*) as total')->groupBy('status')->pluck('total', 'status'),
+            'rutas_by_status' => (clone $rutasQuery)->withTrashed()->selectRaw('status, count(*) as total')->groupBy('status')->pluck('total', 'status'),
             'revenue_completed' => (float) (clone $rutasQuery)->where('status', 'completed')->sum('final_price'),
         ]);
     }

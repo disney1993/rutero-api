@@ -12,11 +12,21 @@ return new class extends Migration
         // ni dejar filas con un valor que ya no existe en la columna.
         DB::table('rutas')->where('status', 'rejected')->update(['status' => 'cancelled']);
 
+        // MODIFY es sintaxis de MySQL; en SQLite (tests) el enum es un CHECK
+        // que no hace falta estrechar.
+        if (DB::getDriverName() !== 'mysql') {
+            return;
+        }
+
         DB::statement("ALTER TABLE rutas MODIFY status ENUM('pending', 'completed', 'cancelled') DEFAULT 'pending'");
     }
 
     public function down(): void
     {
+        if (DB::getDriverName() !== 'mysql') {
+            return;
+        }
+
         DB::statement("ALTER TABLE rutas MODIFY status ENUM('pending', 'completed', 'rejected', 'cancelled') DEFAULT 'pending'");
     }
 };

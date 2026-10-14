@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Vehicle;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class VehicleController extends Controller
 {
@@ -18,7 +19,11 @@ class VehicleController extends Controller
             $ownerId = $request->integer('owner_id');
         }
 
-        $vehicles = Vehicle::where('owner_id', $ownerId)->get();
+        // rutas_count permite a la app avisar de antemano de que un vehículo
+        // con viajes no se puede eliminar (ver destroy).
+        // Cuenta también los viajes eliminados (borrado blando): siguen apuntando al
+        // vehículo y la clave foránea impediría borrarlo.
+        $vehicles = Vehicle::where('owner_id', $ownerId)->withCount(['rutas' => fn ($q) => $q->withTrashed()])->get();
         return response()->json($vehicles);
     }
 
@@ -27,14 +32,17 @@ class VehicleController extends Controller
         $user = $request->user();
         if (! $user) return response()->json([], 401);
 
+        $this->normalizePlate($request);
+
+        // Todo obligatorio salvo las notas (igual en update).
         $data = $request->validate([
-            'plate' => ['nullable', 'string', 'max:20', 'regex:/^[A-Za-z0-9\-\s]+$/', 'unique:vehicles,plate'],
-            'make' => 'nullable|string|max:100',
-            'model' => 'nullable|string|max:100',
-            'color' => 'nullable|string|max:50',
-            'year' => 'nullable|integer|min:1900|max:' . (date('Y') + 1),
-            'seats' => 'nullable|integer|min:1|max:9',
-            'vehicle_type' => 'nullable|string|max:50',
+            'plate' => ['required', 'string', 'max:12', 'regex:/^[A-Z0-9]+$/', 'unique:vehicles,plate'],
+            'make' => 'required|string|max:100',
+            'model' => 'required|string|max:100',
+            'color' => 'required|string|max:50',
+            'year' => 'required|integer|min:1950|max:' . (date('Y') + 1),
+            'seats' => 'required|integer|min:1|max:90',
+            'vehicle_type' => ['required', 'string', Rule::in(Vehicle::TYPES)],
             'is_default' => 'nullable|boolean',
             'notes' => 'nullable|string|max:2000',
             'owner_id' => 'nullable|integer|exists:users,id',
@@ -73,15 +81,16 @@ class VehicleController extends Controller
         if (! $user) return response()->json([], 401);
         if (! $user->isAdmin() && $vehicle->owner_id !== $user->id) return response()->json([], 403);
 
+        $this->normalizePlate($request);
+
         $data = $request->validate([
-            'plate' => ['nullable', 'string', 'max:20', 'regex:/^[A-Za-z0-9\-\s]+$/', 'unique:vehicles,plate,' . $vehicle->id],
-            'make' => 'nullable|string|max:100',
-            'model' => 'nullable|string|max:100',
-            'color' => 'nullable|string|max:50',
-            'year' => 'nullable|integer|min:1900|max:' . (date('Y') + 1),
-            'seats' => 'nullable|integer|min:1|max:9',
-            'vehicle_type' => 'nullable|string|max:50',
-            'active' => 'nullable|boolean',
+            'plate' => ['required', 'string', 'max:12', 'regex:/^[A-Z0-9]+$/', 'unique:vehicles,plate,' . $vehicle->id],
+            'make' => 'required|string|max:100',
+            'model' => 'required|string|max:100',
+            'color' => 'required|string|max:50',
+            'year' => 'required|integer|min:1950|max:' . (date('Y') + 1),
+            'seats' => 'required|integer|min:1|max:90',
+            'vehicle_type' => ['required', 'string', Rule::in(Vehicle::TYPES)],
             'is_default' => 'nullable|boolean',
             'notes' => 'nullable|string|max:2000',
         ]);
@@ -110,18 +119,28 @@ class VehicleController extends Controller
         if (! $user) return response()->json([], 401);
         if (! $user->isAdmin() && $vehicle->owner_id !== $user->id) return response()->json([], 403);
 
-        // prevent delete if trips exist
-        if ($vehicle->rutas()->exists()) {
-            return response()->json(['message' => 'Cannot delete vehicle with associated rutas'], 422);
-        }
-
         // El vehículo predeterminado no se puede borrar directamente: hay que
         // asignar el atributo a otro primero, para no dejar la flota sin uno.
         if ($vehicle->is_default) {
             return response()->json(['message' => 'No puedes eliminar el vehículo predeterminado. Marca otro como predeterminado antes de eliminar este.'], 422);
         }
 
+        // Con viajes asociados tampoco: se perdería a qué vehículo correspondían.
+        if ($vehicle->rutas()->withTrashed()->exists()) {
+            return response()->json(['message' => 'No puedes eliminar un vehículo que tiene viajes asociados.'], 422);
+        }
+
         $vehicle->delete();
         return response()->json(['message' => 'Vehicle deleted']);
+    }
+
+    // La matrícula se guarda solo con letras y números en mayúsculas: se
+    // quitan espacios, guiones y demás antes de validar, así "1234-abc" y
+    // "1234 ABC" son la misma matrícula (y la regla unique lo detecta).
+    private function normalizePlate(Request $request): void
+    {
+        if ($request->has('plate') && is_string($request->input('plate'))) {
+            $request->merge(['plate' => strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $request->input('plate')))]);
+        }
     }
 }

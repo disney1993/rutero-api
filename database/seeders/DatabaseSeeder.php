@@ -42,7 +42,7 @@ class DatabaseSeeder extends Seeder
         );
 
         Vehicle::updateOrCreate(
-            ['plate' => 'TEST-001'],
+            ['plate' => 'TEST001'],
             [
                 'owner_id' => $owner->id,
                 'make' => 'Toyota',

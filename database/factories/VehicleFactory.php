@@ -23,14 +23,13 @@ class VehicleFactory extends Factory
 
         return [
             'owner_id' => User::factory(),
-            'plate' => strtoupper($this->faker->unique()->bothify('####-???')),
+            'plate' => strtoupper($this->faker->unique()->bothify('####???')),
             'make' => $make,
             'model' => $model,
             'color' => $this->faker->safeColorName(),
             'year' => $this->faker->numberBetween(2012, 2024),
             'seats' => $this->faker->randomElement([4, 5, 7]),
             'vehicle_type' => $this->faker->randomElement(['sedan', 'suv', 'compacto', 'monovolumen']),
-            'active' => true,
             'notes' => null,
         ];
     }

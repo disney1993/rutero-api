@@ -23,7 +23,7 @@ class OwnerCodeTest extends TestCase
         $ownerId = $resp->json('user.id');
 
         // Owner mode only activates once the user has a vehicle.
-        $vehicle = $this->withHeaders(['Authorization' => 'Bearer ' . $token])->postJson('/api/vehicles', ['plate' => 'CODE-001']);
+        $vehicle = $this->withHeaders(['Authorization' => 'Bearer ' . $token])->postJson('/api/vehicles', ['make' => 'Seat', 'model' => 'Ibiza', 'color' => 'Blanco', 'year' => 2020, 'seats' => 5, 'plate' => 'CODE-001', 'vehicle_type' => 'sedan']);
         $vehicle->assertStatus(201);
 
         $month = date('Y-m');
@@ -75,7 +75,7 @@ class OwnerCodeTest extends TestCase
         $otoken = $oreg->json('access_token');
         $ownerId = $oreg->json('user.id');
 
-        $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])->postJson('/api/vehicles', ['plate' => 'DELX-001'])->assertStatus(201);
+        $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])->postJson('/api/vehicles', ['make' => 'Seat', 'model' => 'Ibiza', 'color' => 'Blanco', 'year' => 2020, 'seats' => 5, 'plate' => 'DELX-001', 'vehicle_type' => 'sedan'])->assertStatus(201);
         $month = date('Y-m');
         $code = $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])->postJson('/api/owner/codes', ['month' => $month])->json('code');
 
@@ -121,7 +121,7 @@ class OwnerCodeTest extends TestCase
             'email' => 'ownerbad@example.test', 'password' => 'Secret123!',
         ]);
         $token = $resp->json('access_token');
-        $this->withHeaders(['Authorization' => 'Bearer ' . $token])->postJson('/api/vehicles', ['plate' => 'BAD-001'])->assertStatus(201);
+        $this->withHeaders(['Authorization' => 'Bearer ' . $token])->postJson('/api/vehicles', ['make' => 'Seat', 'model' => 'Ibiza', 'color' => 'Blanco', 'year' => 2020, 'seats' => 5, 'plate' => 'BAD-001', 'vehicle_type' => 'sedan'])->assertStatus(201);
 
         $create = $this->withHeaders(['Authorization' => 'Bearer ' . $token])->postJson('/api/owner/codes', ['month' => 'not-a-month']);
         $create->assertStatus(422)->assertJsonValidationErrors(['month']);

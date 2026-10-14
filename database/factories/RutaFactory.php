@@ -56,9 +56,9 @@ class RutaFactory extends Factory
         $pricePerKm = $this->faker->randomFloat(2, 0.9, 1.6);
         $estimatedPrice = round($distanceKm * $pricePerKm, 2);
 
-        $status = $this->faker->randomElement([
-            'completed', 'completed', 'completed', 'pending', 'pending', 'cancelled',
-        ]);
+        // Los cancelados van aparte (estado cancelled() de abajo): cancelar es
+        // eliminar con borrado blando y no deben colarse al azar en los tests.
+        $status = $this->faker->randomElement(['completed', 'completed', 'completed', 'pending', 'pending']);
 
         return [
             'client_name' => $this->faker->name(),
@@ -70,6 +70,8 @@ class RutaFactory extends Factory
             'destination_lat' => $destLat,
             'destination_lng' => $destLng,
             'estimated_distance_km' => $distanceKm,
+            // Aproximación a la duración de OSRM (~75 km/h de media en interurbano).
+            'estimated_duration_min' => (int) max(5, round($distanceKm / 75 * 60)),
             'price_per_km' => $pricePerKm,
             'estimated_price' => $estimatedPrice,
             'final_price' => $status === 'completed' ? round($estimatedPrice / 5) * 5 : null,
@@ -81,5 +83,11 @@ class RutaFactory extends Factory
             'hidden' => false,
             'notes' => $this->faker->boolean(30) ? $this->faker->sentence() : null,
         ];
+    }
+
+    // Viaje cancelado = eliminado con borrado blando (ver RutaController::destroy).
+    public function cancelled(): static
+    {
+        return $this->state(fn () => ['status' => 'cancelled', 'deleted_at' => now()]);
     }
 }

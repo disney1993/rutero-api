@@ -58,6 +58,31 @@ C:\tools\php85\php.exe artisan serve --host=127.0.0.1 --port=8000
 - API: http://127.0.0.1:8000
 - Health check: http://127.0.0.1:8000/api/health
 
+## Cierre automático de viajes (cron)
+
+El comando `rutas:auto-complete` marca como **completadas y pagadas en efectivo** las rutas pendientes cuyo viaje ya ha terminado, para que el conductor no tenga que tocar el móvil al volante. Una ruta se cierra con lo primero que ocurra:
+
+1. **Empieza el siguiente viaje** de la misma unidad de trabajo: el conductor asignado o, si no lo hay, el vehículo. Se evalúa por unidad, no sobre todo el sistema.
+2. **Se alcanza el fin estimado**: `inicio + espera inicial (10 min) + d + 10 % de d (tráfico) + margen final (5 min, bajada y cobro)`, donde `d` es la duración por carretera de OSRM (`estimated_duration_min`). Todos los valores son configurables por cada propietario. Sin duración se estima con los km a 50 km/h y, sin km, con la duración por defecto del propietario. Las rutas sin hora se cierran al final de su día.
+
+Solo afecta a rutas `pending` que el cron no haya procesado antes. No cambia la forma de pago ni el precio final si ya estaban indicados. Las rutas cerradas quedan con `auto_completed = true` y aparecen en "Por revisar" (`GET /api/rutas?needs_review=1`) hasta que alguien las revisa (`POST /api/rutas/{id}/review`) o las edita. Si se vuelven a poner en `pending`, se deshace el cierre y el cron no las vuelve a cerrar. Cada propietario puede desactivarlo o ajustar los márgenes (`PATCH /api/user/preferences`: `auto_complete_enabled`, `auto_complete_start_delay_min`, `auto_complete_margin_min`, `auto_complete_margin_pct`, `auto_complete_default_duration_min`). Las horas se interpretan en `RUTERO_TIMEZONE` (por defecto `Europe/Madrid`).
+
+Está programado cada minuto en `routes/console.php`, así que hace falta que el planificador de Laravel esté en marcha:
+
+```powershell
+# En local (deja la terminal abierta):
+C:\tools\php85\php.exe artisan schedule:work
+
+# Ejecutarlo una vez a mano:
+C:\tools\php85\php.exe artisan rutas:auto-complete
+```
+
+En producción, añade al crontab del servidor:
+
+```
+* * * * * cd /ruta/a/rutero-api && php artisan schedule:run >> /dev/null 2>&1
+```
+
 ## Ejecutar el frontend (rutero-react)
 
 Con la API anterior corriendo, en otra terminal:

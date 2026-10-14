@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Ruta;
+use App\Models\User;
+use App\Services\RutaAutoCompleter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -17,10 +19,18 @@ class RutaController extends Controller
             'date_to' => 'sometimes|date|after_or_equal:date_from',
             'user_id' => 'sometimes|integer',
             'search' => 'sometimes|string|max:255',
+            'needs_review' => 'sometimes|boolean',
+            'with_deleted' => 'sometimes|boolean',
         ]);
 
         $user = $request->user();
         $query = Ruta::query()->with('completer:id,first_name,last_name');
+
+        // Los listados piden también los eliminados (se muestran atenuados y se
+        // pueden restaurar); calendarios, informes, etc. no los ven.
+        if ($request->boolean('with_deleted')) {
+            $query->withTrashed();
+        }
 
         // Authorization: admin sees all, everyone else sees rutas they own or drive.
         if ($user && ! $user->isAdmin()) {
@@ -60,7 +70,13 @@ class RutaController extends Controller
             $query->where('client_name', 'like', '%' . $request->input('search') . '%');
         }
 
+        // Cerradas automáticamente y aún sin revisar (lista "Por revisar").
+        if ($request->boolean('needs_review')) {
+            $query->where('auto_completed', true)->whereNull('reviewed_at');
+        }
+
         $rutas = $query->orderBy('trip_date', 'desc')->orderBy('trip_time', 'asc')->get();
+        $this->attachAutoCompleteEta($rutas);
 
         return response()->json([
             'data' => $rutas,
@@ -81,6 +97,7 @@ class RutaController extends Controller
             'destination_lng' => 'nullable|numeric|between:-180,180',
             'vehicle_id' => 'nullable|integer|exists:vehicles,id',
             'estimated_distance_km' => 'nullable|numeric|min:0|max:100000',
+            'estimated_duration_min' => 'nullable|integer|min:0|max:6000',
             'price_per_km' => 'nullable|numeric|min:0|max:100000',
             'estimated_price' => 'nullable|numeric|min:0|max:1000000',
             'final_price' => 'nullable|numeric|min:0|max:1000000',
@@ -88,7 +105,8 @@ class RutaController extends Controller
             'passenger_count' => 'nullable|integer|min:1|max:20',
             'trip_date' => 'nullable|date',
             'trip_time' => 'nullable|date_format:H:i',
-            'status' => 'nullable|in:pending,completed,cancelled',
+            // Cancelar = eliminar (borrado blando, ver destroy): no es un estado editable.
+            'status' => 'nullable|in:pending,completed',
             'hidden' => 'nullable|boolean',
             'notes' => 'nullable|string|max:2000',
             'owner_id' => 'nullable|integer|exists:users,id',
@@ -179,6 +197,7 @@ class RutaController extends Controller
         $validated['created_by'] = $user?->id;
 
         $ruta = Ruta::create($validated);
+        $this->attachAutoCompleteEta(collect([$ruta]));
 
         return response()->json($ruta, 201);
     }
@@ -189,6 +208,8 @@ class RutaController extends Controller
         if ($user && ! $user->isAdmin() && $ruta->owner_id !== $user->id && $ruta->driver_id !== $user->id) {
             return response()->json([], 403);
         }
+
+        $this->attachAutoCompleteEta(collect([$ruta]));
 
         return response()->json($ruta);
     }
@@ -205,6 +226,7 @@ class RutaController extends Controller
             'destination_lat' => 'sometimes|nullable|numeric|between:-90,90',
             'destination_lng' => 'sometimes|nullable|numeric|between:-180,180',
             'estimated_distance_km' => 'sometimes|nullable|numeric|min:0|max:100000',
+            'estimated_duration_min' => 'sometimes|nullable|integer|min:0|max:6000',
             'price_per_km' => 'sometimes|nullable|numeric|min:0|max:100000',
             'estimated_price' => 'sometimes|nullable|numeric|min:0|max:1000000',
             'final_price' => 'sometimes|nullable|numeric|min:0|max:1000000',
@@ -212,7 +234,7 @@ class RutaController extends Controller
             'passenger_count' => 'sometimes|nullable|integer|min:1|max:20',
             'trip_date' => 'sometimes|nullable|date',
             'trip_time' => 'sometimes|nullable|date_format:H:i',
-            'status' => 'sometimes|in:pending,completed,cancelled',
+            'status' => 'sometimes|in:pending,completed',
             'notes' => 'sometimes|nullable|string|max:2000',
         ]);
 
@@ -231,7 +253,7 @@ class RutaController extends Controller
         if (! $isOwner) {
             $allowed = ['final_price', 'payment_method', 'status', 'notes'];
             $validated = array_intersect_key($validated, array_flip($allowed));
-            if (isset($validated['status']) && !in_array($validated['status'], ['cancelled', 'completed', 'pending'])) {
+            if (isset($validated['status']) && !in_array($validated['status'], ['completed', 'pending'])) {
                 unset($validated['status']);
             }
         }
@@ -244,9 +266,61 @@ class RutaController extends Controller
             $validated['completed_by'] = $user->id;
         }
 
+        // Cualquier edición de una ruta cerrada automáticamente cuenta como
+        // revisión. Volver a "pendiente" deshace el cierre automático; se
+        // conserva auto_completed_at para que el cron no la vuelva a cerrar.
+        if ($ruta->auto_completed) {
+            $validated['reviewed_at'] = now();
+            if (($validated['status'] ?? null) === 'pending') {
+                $validated['auto_completed'] = false;
+            }
+        }
+
+        // Si cambia la fecha u hora de una ruta pendiente, el cierre
+        // automático se vuelve a programar para el nuevo horario.
+        $dateChanged = array_key_exists('trip_date', $validated)
+            && $validated['trip_date'] !== $ruta->trip_date?->format('Y-m-d');
+        $timeChanged = array_key_exists('trip_time', $validated) && $validated['trip_time'] !== $ruta->trip_time;
+        if (($dateChanged || $timeChanged) && ($validated['status'] ?? $ruta->status) === 'pending') {
+            $validated['auto_completed'] = false;
+            $validated['auto_completed_at'] = null;
+        }
+
         $ruta->update($validated);
+        $this->attachAutoCompleteEta(collect([$ruta]));
 
         return response()->json($ruta);
+    }
+
+    // "Correcto": marca como revisado un cierre automático sin cambiar nada.
+    public function review(Request $request, Ruta $ruta): JsonResponse
+    {
+        $user = $request->user();
+        $allowed = $user->isAdmin() || $ruta->owner_id === $user->id || $ruta->driver_id === $user->id;
+        if (! $allowed) {
+            return response()->json([], 403);
+        }
+
+        if ($ruta->auto_completed && ! $ruta->reviewed_at) {
+            $ruta->update(['reviewed_at' => now()]);
+        }
+
+        return response()->json($ruta);
+    }
+
+    /**
+     * Añade auto_complete_eta: hora local ("Y-m-d\TH:i") a partir de la cual el
+     * cron cerrará la ruta si el siguiente viaje no lo adelanta. La app la usa
+     * para avisar al usuario de que el viaje se completará solo.
+     */
+    private function attachAutoCompleteEta($rutas): void
+    {
+        $completer = app(RutaAutoCompleter::class);
+        $owners = User::whereIn('id', $rutas->pluck('owner_id')->filter()->unique())->get()->keyBy('id');
+
+        foreach ($rutas as $ruta) {
+            $ruta->setAttribute('auto_complete_eta', $completer->etaFor($ruta, $owners->get($ruta->owner_id)));
+        }
     }
 
     public function destroy(Request $request, Ruta $ruta): JsonResponse
@@ -259,8 +333,32 @@ class RutaController extends Controller
             return response()->json(['message' => 'Forbidden'], 403);
         }
 
+        // Cancelar y eliminar son lo mismo: queda como "cancelled" y con borrado
+        // blando (sigue en los listados, tachado, y se puede deshacer con restore()).
+        $ruta->status = 'cancelled';
+        $ruta->save();
         $ruta->delete();
 
         return response()->json(['message' => 'Ruta eliminada correctamente']);
+    }
+
+    // Recupera un viaje eliminado (mismos permisos que para eliminarlo).
+    public function restore(Request $request, Ruta $ruta): JsonResponse
+    {
+        $user = $request->user();
+        $isOwner = $user && ($user->isAdmin() || $ruta->owner_id === $user->id);
+        $isCreatorDriver = $user && $ruta->driver_id === $user->id && $ruta->created_by === $user->id;
+
+        if (! $isOwner && ! $isCreatorDriver) {
+            return response()->json(['message' => 'Forbidden'], 403);
+        }
+
+        if ($ruta->trashed()) {
+            $ruta->restore();
+            $ruta->status = 'pending';
+            $ruta->save();
+        }
+
+        return response()->json($ruta->fresh());
     }
 }

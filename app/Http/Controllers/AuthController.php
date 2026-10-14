@@ -138,6 +138,11 @@ class AuthController extends Controller
             'currency' => ['sometimes', 'in:EUR,USD'],
             'theme' => ['sometimes', 'in:system,light,dark'],
             'language' => ['sometimes', 'in:es,en'],
+            'auto_complete_enabled' => ['sometimes', 'boolean'],
+            'auto_complete_start_delay_min' => ['sometimes', 'integer', 'min:0', 'max:120'],
+            'auto_complete_margin_min' => ['sometimes', 'integer', 'min:0', 'max:240'],
+            'auto_complete_margin_pct' => ['sometimes', 'integer', 'min:0', 'max:100'],
+            'auto_complete_default_duration_min' => ['sometimes', 'integer', 'min:5', 'max:1440'],
         ]);
 
         $user = $request->user();

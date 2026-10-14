@@ -71,7 +71,8 @@ class AdminController extends Controller
         // vehículos podría chocar con la restricción de rutas.vehicle_id
         // (restrictOnDelete) antes de que el cascade de owner_id actúe.
         DB::transaction(function () use ($user) {
-            Ruta::where('owner_id', $user->id)->delete();
+            // Al borrar la cuenta sí se eliminan de verdad (también los ya eliminados).
+            Ruta::withTrashed()->where('owner_id', $user->id)->forceDelete();
             $user->delete();
         });
 
@@ -95,7 +96,8 @@ class AdminController extends Controller
             'owners_total' => $users->filter(fn (User $u) => $u->hasOwnerCapability())->count(),
             'drivers_total' => $users->filter(fn (User $u) => $u->hasDriverCapability())->count(),
             'vehicles_total' => Vehicle::count(),
-            'rutas_by_status' => Ruta::selectRaw('status, count(*) as total')->groupBy('status')->pluck('total', 'status'),
+            // Incluye los cancelados (borrado blando).
+            'rutas_by_status' => Ruta::withTrashed()->selectRaw('status, count(*) as total')->groupBy('status')->pluck('total', 'status'),
             'revenue_completed' => (float) Ruta::where('status', 'completed')->sum('final_price'),
             'top_owners' => $topOwners,
         ]);

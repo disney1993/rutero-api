@@ -4,10 +4,12 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Ruta extends Model
 {
-    use HasFactory;
+    // Borrado blando: los viajes eliminados se pueden restaurar (ver RutaController::restore).
+    use HasFactory, SoftDeletes;
 
     protected $table = 'rutas';
 
@@ -16,6 +18,9 @@ class Ruta extends Model
         'driver_id',
         'created_by',
         'completed_by',
+        'auto_completed',
+        'auto_completed_at',
+        'reviewed_at',
         'vehicle_id',
         'client_name',
         'client_phone',
@@ -26,6 +31,7 @@ class Ruta extends Model
         'destination_lat',
         'destination_lng',
         'estimated_distance_km',
+        'estimated_duration_min',
         'price_per_km',
         'estimated_price',
         'final_price',
@@ -59,7 +65,19 @@ class Ruta extends Model
     protected $casts = [
         'trip_date' => 'date',
         'hidden' => 'boolean',
+        'estimated_duration_min' => 'integer',
+        'auto_completed' => 'boolean',
+        'auto_completed_at' => 'datetime',
+        'reviewed_at' => 'datetime',
     ];
+
+    protected $appends = ['needs_review'];
+
+    // Cerrada por el cron y todavía sin revisar: aparece en "Por revisar".
+    public function getNeedsReviewAttribute(): bool
+    {
+        return (bool) $this->auto_completed && $this->reviewed_at === null;
+    }
 
     // La columna es TIME en MySQL y siempre guarda/devuelve segundos
     // ("14:30:00"); la app solo necesita horas y minutos.

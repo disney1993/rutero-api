@@ -29,6 +29,11 @@ class User extends Authenticatable
         'currency',
         'theme',
         'language',
+        'auto_complete_enabled',
+        'auto_complete_start_delay_min',
+        'auto_complete_margin_min',
+        'auto_complete_margin_pct',
+        'auto_complete_default_duration_min',
         'email',
         'password',
         'role',
@@ -67,6 +72,11 @@ class User extends Authenticatable
             'first_name' => 'string',
             'last_name' => 'string',
             'premium_expires_at' => 'datetime',
+            'auto_complete_enabled' => 'boolean',
+            'auto_complete_start_delay_min' => 'integer',
+            'auto_complete_margin_min' => 'integer',
+            'auto_complete_margin_pct' => 'integer',
+            'auto_complete_default_duration_min' => 'integer',
         ];
     }
 
