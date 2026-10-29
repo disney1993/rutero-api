@@ -49,6 +49,14 @@ class AdminController extends Controller
             'premium_expires_at' => ['sometimes', 'nullable', 'date'],
         ]);
 
+        // Promover a admin desde el panel es peligroso: se rechaza en API
+        // (la UI también deshabilita esa opción).
+        if (($data['role'] ?? null) === 'admin' && $user->role !== 'admin') {
+            return response()->json([
+                'message' => 'No se puede promover a administrador desde este panel',
+            ], 422);
+        }
+
         if (array_key_exists('first_name', $data) || array_key_exists('last_name', $data) || array_key_exists('second_last_name', $data)) {
             $firstName = $data['first_name'] ?? $user->first_name;
             $lastName = $data['last_name'] ?? $user->last_name;
@@ -67,12 +75,17 @@ class AdminController extends Controller
             return response()->json(['message' => 'No puedes eliminar tu propia cuenta de administrador'], 422);
         }
 
-        // Elimina primero las rutas que este usuario posee: si no, borrar sus
-        // vehículos podría chocar con la restricción de rutas.vehicle_id
-        // (restrictOnDelete) antes de que el cascade de owner_id actúe.
+        // Borrado blando: el usuario y sus rutas/vehículos quedan con deleted_at.
+        // Como SoftDeletes no dispara cascadeOnDelete de MySQL, se desasigna
+        // como conductor en rutas ajenas (antes lo hacía nullOnDelete al hard-delete).
         DB::transaction(function () use ($user) {
-            // Al borrar la cuenta sí se eliminan de verdad (también los ya eliminados).
-            Ruta::withTrashed()->where('owner_id', $user->id)->forceDelete();
+            Ruta::where('owner_id', $user->id)->delete();
+            Vehicle::where('owner_id', $user->id)->delete();
+
+            Ruta::where('driver_id', $user->id)->update(['driver_id' => null]);
+            Vehicle::where('assigned_driver_id', $user->id)->update(['assigned_driver_id' => null]);
+
+            $user->tokens()->delete();
             $user->delete();
         });
 

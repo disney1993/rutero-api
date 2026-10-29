@@ -69,8 +69,8 @@ class DatabaseSeeder extends Seeder
 
         $month = date('Y-m');
         $ownerCode = OwnerMonthCode::updateOrCreate(
-            ['owner_id' => $owner->id, 'month' => $month],
-            ['code' => 'OWNER001']
+            ['owner_id' => $owner->id, 'month' => $month, 'type' => OwnerMonthCode::TYPE_MONTH],
+            ['code' => 'OWNER001', 'valid_on' => null]
         );
 
         DriverCodeEntry::firstOrCreate([

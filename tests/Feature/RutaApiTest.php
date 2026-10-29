@@ -29,10 +29,12 @@ class RutaApiTest extends TestCase
             'estimated_distance_km' => 75,
             'price_per_km' => 1.5,
             'estimated_price' => 112.5,
+            'final_price' => 115,
             'payment_method' => 'efectivo',
             'passenger_count' => 2,
             'status' => 'pending',
             'trip_date' => '2026-08-25',
+            'trip_time' => '09:30',
             'notes' => 'Vuelo temprano',
         ];
 
@@ -47,12 +49,15 @@ class RutaApiTest extends TestCase
     {
         $payload = [
             'client_name' => 'Ana García',
+            'client_phone' => '612345678',
             'origin' => 'Madrid',
             'origin_lat' => 40.4168,
             'origin_lng' => -3.7038,
             'destination' => 'Toledo',
             'destination_lat' => 39.8628,
             'destination_lng' => -4.0273,
+            'trip_time' => '10:00',
+            'final_price' => 80,
         ];
 
         $response = $this->postJson('/api/rutas', $payload);
@@ -66,9 +71,12 @@ class RutaApiTest extends TestCase
     {
         $response = $this->postJson('/api/rutas', [
             'client_name' => 'Ana García',
+            'client_phone' => '612345678',
             'origin' => 'Madrid',
             'origin_lat' => 200,
             'destination' => 'Toledo',
+            'trip_time' => '10:00',
+            'final_price' => 80,
         ]);
 
         $response->assertStatus(422)->assertJsonValidationErrors(['origin_lat']);
@@ -99,14 +107,17 @@ class RutaApiTest extends TestCase
     {
         $payload = [
             'client_name' => 'Pedro López',
+            'client_phone' => '698765432',
             'origin' => 'Sevilla',
             'destination' => 'Cádiz',
             'estimated_distance_km' => 120,
             'price_per_km' => 1.75,
+            'final_price' => 210,
             'payment_method' => 'tarjeta',
             'passenger_count' => 3,
             'status' => 'pending',
             'trip_date' => '2026-08-26',
+            'trip_time' => '11:15',
         ];
 
         $response = $this->postJson('/api/rutas', $payload);
@@ -121,8 +132,11 @@ class RutaApiTest extends TestCase
 
         $response = $this->postJson('/api/rutas', [
             'client_name' => 'Ana García',
+            'client_phone' => '612345678',
             'origin' => 'Madrid',
             'destination' => 'Toledo',
+            'trip_time' => '09:00',
+            'final_price' => 50,
             'owner_id' => $victim->id,
             'driver_id' => $victim->id,
         ]);
@@ -136,8 +150,11 @@ class RutaApiTest extends TestCase
     {
         $response = $this->postJson('/api/rutas', [
             'client_name' => 'Ana',
+            'client_phone' => '612345678',
             'origin' => 'M',
             'destination' => 'Toledo',
+            'trip_time' => '09:00',
+            'final_price' => 50,
             'price_per_km' => -5,
         ]);
 

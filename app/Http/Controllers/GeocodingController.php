@@ -9,10 +9,12 @@ use Illuminate\Support\Facades\Log;
 
 // Servicios públicos y gratuitos, sin necesidad de API key:
 // - Nominatim (OpenStreetMap) para buscar direcciones reales.
-// - OSRM (demo pública) para calcular la distancia real por carretera.
+// - OSRM (demo pública) para calcular la distancia real por carretera
+//   (distance_km + duration_min).
 // Ambos son servicios de demostración compartidos: no tienen SLA ni
-// garantía de disponibilidad para tráfico alto. Si la app crece, conviene
-// pasar a un proveedor de pago (Google, Mapbox, HERE) o autoalojarlos.
+// garantía de disponibilidad para tráfico alto.
+// TODO: si se configura GOOGLE_MAPS_API_KEY, usar Distance Matrix / Routes
+// como primario o fallback, y deep-link de navegación en la app.
 class GeocodingController extends Controller
 {
     private const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';

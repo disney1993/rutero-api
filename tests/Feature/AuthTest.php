@@ -117,14 +117,56 @@ class AuthTest extends TestCase
             'email' => 'marta.profile@example.test', 'password' => 'Secret123!',
         ]);
         $token = $register->json('access_token');
+        $this->assertEquals('password', $register->json('user.auth_provider'));
+        $this->assertFalse($register->json('user.is_google_account'));
 
         $resp = $this->withHeader('Authorization', "Bearer $token")
-            ->patchJson('/api/user', ['email' => 'marta.new@example.test', 'second_last_name' => 'Ruiz']);
+            ->patchJson('/api/user', [
+                'email' => 'marta.new@example.test',
+                'second_last_name' => 'Ruiz',
+                'current_password' => 'Secret123!',
+            ]);
 
         $resp->assertStatus(200)
             ->assertJsonPath('email', 'marta.new@example.test')
             ->assertJsonPath('second_last_name', 'Ruiz')
             ->assertJsonPath('name', 'Marta Lopez Ruiz');
+    }
+
+    public function test_update_email_requires_current_password()
+    {
+        $register = $this->postJson('/api/register', [
+            'first_name' => 'Marta', 'last_name' => 'Pass',
+            'email' => 'marta.emailpwd@example.test', 'password' => 'Secret123!',
+        ]);
+        $token = $register->json('access_token');
+
+        $missing = $this->withHeader('Authorization', "Bearer $token")
+            ->patchJson('/api/user', ['email' => 'marta.emailpwd2@example.test']);
+        $missing->assertStatus(422)->assertJsonValidationErrors(['current_password']);
+
+        $wrong = $this->withHeader('Authorization', "Bearer $token")
+            ->patchJson('/api/user', [
+                'email' => 'marta.emailpwd2@example.test',
+                'current_password' => 'WrongPass1!',
+            ]);
+        $wrong->assertStatus(422)->assertJsonValidationErrors(['current_password']);
+    }
+
+    public function test_update_profile_name_without_email_does_not_require_password()
+    {
+        $register = $this->postJson('/api/register', [
+            'first_name' => 'Solo', 'last_name' => 'Nombre',
+            'email' => 'solo.nombre@example.test', 'password' => 'Secret123!',
+        ]);
+        $token = $register->json('access_token');
+
+        $resp = $this->withHeader('Authorization', "Bearer $token")
+            ->patchJson('/api/user', ['first_name' => 'Nuevo']);
+
+        $resp->assertStatus(200)
+            ->assertJsonPath('first_name', 'Nuevo')
+            ->assertJsonPath('email', 'solo.nombre@example.test');
     }
 
     public function test_update_profile_rejects_taken_email()
@@ -140,9 +182,59 @@ class AuthTest extends TestCase
         $token = $register->json('access_token');
 
         $resp = $this->withHeader('Authorization', "Bearer $token")
-            ->patchJson('/api/user', ['email' => 'taken.profile@example.test']);
+            ->patchJson('/api/user', [
+                'email' => 'taken.profile@example.test',
+                'current_password' => 'Secret123!',
+            ]);
 
         $resp->assertStatus(422)->assertJsonValidationErrors(['email']);
+    }
+
+    public function test_google_account_cannot_change_email()
+    {
+        Http::fake(["https://oauth2.googleapis.com/tokeninfo*" => Http::response([
+            'email' => 'glock@example.test',
+            'sub' => 'google-sub-lock-1',
+            'given_name' => 'G',
+            'family_name' => 'Lock',
+            'picture' => 'http://example.com/pic.png',
+        ], 200)]);
+
+        $gresp = $this->postJson('/api/auth/google/mobile', ['id_token' => 'fake-token-lock']);
+        $gresp->assertStatus(200);
+        $this->assertTrue($gresp->json('user.is_google_account'));
+        $this->assertEquals('google', $gresp->json('user.auth_provider'));
+        $token = $gresp->json('access_token');
+
+        $resp = $this->withHeader('Authorization', "Bearer $token")
+            ->patchJson('/api/user', [
+                'email' => 'other@example.test',
+                'current_password' => 'anything',
+            ]);
+
+        $resp->assertStatus(422)->assertJsonValidationErrors(['email']);
+    }
+
+    public function test_google_account_cannot_change_password()
+    {
+        Http::fake(["https://oauth2.googleapis.com/tokeninfo*" => Http::response([
+            'email' => 'gnopass@example.test',
+            'sub' => 'google-sub-nopass-1',
+            'given_name' => 'G',
+            'family_name' => 'NoPass',
+            'picture' => 'http://example.com/pic.png',
+        ], 200)]);
+
+        $gresp = $this->postJson('/api/auth/google/mobile', ['id_token' => 'fake-token-nopass']);
+        $token = $gresp->json('access_token');
+
+        $resp = $this->withHeader('Authorization', "Bearer $token")->patchJson('/api/user/password', [
+            'current_password' => 'Secret123!',
+            'password' => 'NewSecret456!',
+            'password_confirmation' => 'NewSecret456!',
+        ]);
+
+        $resp->assertStatus(422)->assertJsonValidationErrors(['password']);
     }
 
     public function test_user_can_change_password_with_correct_current_password()
@@ -226,6 +318,39 @@ class AuthTest extends TestCase
             'current_password' => 'Secret123!',
             'password' => 'weakpass',
             'password_confirmation' => 'weakpass',
+        ]);
+        $resp->assertStatus(422)->assertJsonValidationErrors(['password']);
+    }
+
+    public function test_change_password_rejects_password_longer_than_72()
+    {
+        $register = $this->postJson('/api/register', [
+            'first_name' => 'Pass', 'last_name' => 'Long',
+            'email' => 'passlong@example.test', 'password' => 'Secret123!',
+        ]);
+        $token = $register->json('access_token');
+        $tooLong = 'Aa1!' . str_repeat('x', 70);
+
+        $resp = $this->withHeader('Authorization', "Bearer $token")->patchJson('/api/user/password', [
+            'current_password' => 'Secret123!',
+            'password' => $tooLong,
+            'password_confirmation' => $tooLong,
+        ]);
+        $resp->assertStatus(422)->assertJsonValidationErrors(['password']);
+    }
+
+    public function test_change_password_rejects_confirmation_mismatch()
+    {
+        $register = $this->postJson('/api/register', [
+            'first_name' => 'Pass', 'last_name' => 'Mismatch',
+            'email' => 'passmismatch@example.test', 'password' => 'Secret123!',
+        ]);
+        $token = $register->json('access_token');
+
+        $resp = $this->withHeader('Authorization', "Bearer $token")->patchJson('/api/user/password', [
+            'current_password' => 'Secret123!',
+            'password' => 'NewSecret456!',
+            'password_confirmation' => 'OtherSecret789!',
         ]);
         $resp->assertStatus(422)->assertJsonValidationErrors(['password']);
     }
@@ -337,5 +462,7 @@ class AuthTest extends TestCase
         $this->assertEquals('gdriver@example.test', $user['email']);
         $this->assertEquals('user', $user['role']);
         $this->assertEquals(0.75, $user['price_per_km']);
+        $this->assertEquals('google', $user['auth_provider']);
+        $this->assertTrue($user['is_google_account']);
     }
 }

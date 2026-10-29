@@ -4,6 +4,7 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens; // ✅ Esto es lo que falta
@@ -11,7 +12,8 @@ use Laravel\Sanctum\HasApiTokens; // ✅ Esto es lo que falta
 class User extends Authenticatable
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasApiTokens, HasFactory, Notifiable;
+    // SoftDeletes: listados, login y resolución Sanctum ignoran cuentas borradas.
+    use HasApiTokens, HasFactory, Notifiable, SoftDeletes;
 
     /**
      * The attributes that are mass assignable.
@@ -29,12 +31,15 @@ class User extends Authenticatable
         'currency',
         'theme',
         'language',
+        'work_mode',
         'auto_complete_enabled',
         'auto_complete_start_delay_min',
         'auto_complete_margin_min',
         'auto_complete_margin_pct',
         'auto_complete_default_duration_min',
         'email',
+        'auth_provider',
+        'google_id',
         'password',
         'role',
         'plan',
@@ -47,6 +52,8 @@ class User extends Authenticatable
         'is_admin',
         'is_premium',
         'profile_incomplete',
+        'effective_work_mode',
+        'is_google_account',
     ];
 
     /**
@@ -124,6 +131,12 @@ class User extends Authenticatable
         return blank($this->first_name) || blank($this->last_name);
     }
 
+    /** Cuenta creada vía Google (email no editable; contraseña no gestionable aquí). */
+    public function isGoogleAccount(): bool
+    {
+        return $this->auth_provider === 'google';
+    }
+
     public function getHasOwnerCapabilityAttribute(): bool
     {
         return $this->hasOwnerCapability();
@@ -147,5 +160,38 @@ class User extends Authenticatable
     public function getProfileIncompleteAttribute(): bool
     {
         return $this->hasIncompleteProfile();
+    }
+
+    /**
+     * Modo de trabajo efectivo para la app: con capacidad de propietario
+     * respeta work_mode (puede probar driver sin haber unido códigos aún);
+     * conductor puro → driver; resto → owner (usuarios nuevos sin flota).
+     */
+    public function effectiveWorkMode(): string
+    {
+        $owner = $this->hasOwnerCapability();
+        $driver = $this->hasDriverCapability();
+
+        if ($owner) {
+            return in_array($this->work_mode, ['owner', 'driver'], true)
+                ? $this->work_mode
+                : 'owner';
+        }
+
+        if ($driver) {
+            return 'driver';
+        }
+
+        return 'owner';
+    }
+
+    public function getEffectiveWorkModeAttribute(): string
+    {
+        return $this->effectiveWorkMode();
+    }
+
+    public function getIsGoogleAccountAttribute(): bool
+    {
+        return $this->isGoogleAccount();
     }
 }

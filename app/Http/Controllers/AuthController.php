@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Support\AvatarPalette;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
 use Laravel\Socialite\Facades\Socialite;
 
 class AuthController extends Controller
@@ -46,6 +47,7 @@ class AuthController extends Controller
             // Precio orientativo por defecto; el usuario lo puede cambiar luego en Ajustes.
             'price_per_km' => self::DEFAULT_PRICE_PER_KM,
             'email'    => $request->email,
+            'auth_provider' => 'password',
             'password' => Hash::make($request->password),
             'role'     => 'user',
         ]);
@@ -94,7 +96,28 @@ class AuthController extends Controller
             'last_name' => ['sometimes', 'string', 'min:2', 'max:50', 'regex:/^[\p{L}\s]+$/u'],
             'second_last_name' => ['sometimes', 'nullable', 'string', 'min:2', 'max:50', 'regex:/^[\p{L}\s]+$/u'],
             'email' => ['sometimes', 'string', 'email', 'max:255', 'unique:users,email,' . $user->id],
+            'current_password' => ['nullable', 'string', 'max:72'],
         ]);
+
+        $emailChanging = array_key_exists('email', $data)
+            && strcasecmp((string) $data['email'], (string) $user->email) !== 0;
+
+        if ($emailChanging) {
+            if ($user->isGoogleAccount()) {
+                throw ValidationException::withMessages([
+                    'email' => ['El email de una cuenta de Google no se puede cambiar aquí.'],
+                ]);
+            }
+
+            if (! $request->filled('current_password')
+                || ! Hash::check($request->input('current_password'), $user->password)) {
+                throw ValidationException::withMessages([
+                    'current_password' => ['La contraseña actual no es correcta'],
+                ]);
+            }
+        }
+
+        unset($data['current_password']);
 
         if (array_key_exists('first_name', $data) || array_key_exists('last_name', $data) || array_key_exists('second_last_name', $data)) {
             $firstName = $data['first_name'] ?? $user->first_name;
@@ -112,8 +135,14 @@ class AuthController extends Controller
     {
         $user = $request->user();
 
+        if ($user->isGoogleAccount()) {
+            throw ValidationException::withMessages([
+                'password' => ['Las cuentas de Google no gestionan la contraseña aquí.'],
+            ]);
+        }
+
         $request->validate([
-            'current_password' => ['required', 'string'],
+            'current_password' => ['required', 'string', 'max:72'],
             'password' => ['required', 'string', 'min:6', 'max:72', 'confirmed', 'regex:' . self::PASSWORD_REGEX],
         ]);
 
@@ -138,6 +167,7 @@ class AuthController extends Controller
             'currency' => ['sometimes', 'in:EUR,USD'],
             'theme' => ['sometimes', 'in:system,light,dark'],
             'language' => ['sometimes', 'in:es,en'],
+            'work_mode' => ['sometimes', 'in:owner,driver'],
             'auto_complete_enabled' => ['sometimes', 'boolean'],
             'auto_complete_start_delay_min' => ['sometimes', 'integer', 'min:0', 'max:120'],
             'auto_complete_margin_min' => ['sometimes', 'integer', 'min:0', 'max:240'],
@@ -146,7 +176,18 @@ class AuthController extends Controller
         ]);
 
         $user = $request->user();
+
+        // Propietarios pueden probar modo conductor (y volver) sin exigir
+        // has_driver_capability. Conductores puros deben ganar capacidad de
+        // propietario (p. ej. añadir un vehículo) antes de cambiar.
+        if (array_key_exists('work_mode', $data) && ! $user->hasOwnerCapability()) {
+            return response()->json([
+                'message' => 'Añade un vehículo para poder cambiar el modo de trabajo.',
+            ], 422);
+        }
+
         $user->update($data);
+        $user->refresh();
 
         return response()->json($user);
     }
@@ -179,6 +220,7 @@ class AuthController extends Controller
         $firstName = $googleUser->user['given_name'] ?? null;
         $lastName = $googleUser->user['family_name'] ?? null;
         $avatar = $googleUser->getAvatar();
+        $googleId = $googleUser->getId();
 
         $user = User::firstOrCreate(
             ['email' => $googleUser->getEmail()],
@@ -187,10 +229,18 @@ class AuthController extends Controller
                 'last_name' => $lastName,
                 'name' => trim(($firstName ?? '') . ' ' . ($lastName ?? '')) ?: $googleUser->getName(),
                 'avatar' => $avatar,
+                'avatar_color' => AvatarPalette::random(),
                 'price_per_km' => self::DEFAULT_PRICE_PER_KM,
+                'auth_provider' => 'google',
+                'google_id' => $googleId,
                 'password' => Hash::make(uniqid()), // password random
             ]
         );
+
+        if ($user->wasRecentlyCreated === false && blank($user->google_id) && $googleId) {
+            $user->google_id = $googleId;
+            $user->save();
+        }
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
@@ -256,6 +306,7 @@ class AuthController extends Controller
         $firstName = $data['given_name'] ?? null;
         $lastName = $data['family_name'] ?? null;
         $avatar = $data['picture'] ?? null;
+        $googleId = $data['sub'] ?? null;
 
         $user = User::firstOrCreate(
             ['email' => $email],
@@ -264,11 +315,19 @@ class AuthController extends Controller
                 'last_name' => $lastName,
                 'name' => trim(($firstName ?? '') . ' ' . ($lastName ?? '')) ?: $email,
                 'avatar' => $avatar,
+                'avatar_color' => AvatarPalette::random(),
                 'price_per_km' => self::DEFAULT_PRICE_PER_KM,
+                'auth_provider' => 'google',
+                'google_id' => $googleId,
                 'password' => Hash::make(uniqid()),
                 'role' => 'user',
             ]
         );
+
+        if ($user->wasRecentlyCreated === false && blank($user->google_id) && $googleId) {
+            $user->google_id = $googleId;
+            $user->save();
+        }
 
         $token = $user->createToken('auth_token')->plainTextToken;
 

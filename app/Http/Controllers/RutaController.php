@@ -10,6 +10,14 @@ use Illuminate\Http\Request;
 
 class RutaController extends Controller
 {
+    /** Attribution users for list/edit meta (names + avatar tint). */
+    private const ATTRIBUTION_WITH = [
+        'completer:id,first_name,last_name,avatar_color',
+        'creator:id,first_name,last_name,avatar_color',
+        'canceller:id,first_name,last_name,avatar_color',
+        'completions.user:id,first_name,last_name,avatar_color',
+    ];
+
     public function index(Request $request): JsonResponse
     {
         $request->validate([
@@ -24,7 +32,7 @@ class RutaController extends Controller
         ]);
 
         $user = $request->user();
-        $query = Ruta::query()->with('completer:id,first_name,last_name');
+        $query = Ruta::query()->with(self::ATTRIBUTION_WITH);
 
         // Los listados piden también los eliminados (se muestran atenuados y se
         // pueden restaurar); calendarios, informes, etc. no los ven.
@@ -92,7 +100,7 @@ class RutaController extends Controller
     {
         $validated = $request->validate([
             'client_name' => 'required|string|min:2|max:255',
-            'client_phone' => ['nullable', 'string', 'regex:/^[0-9+\-\s()]{6,20}$/'],
+            'client_phone' => ['required', 'string', 'regex:/^[0-9+\-\s()]{6,20}$/'],
             'origin' => 'required|string|min:2|max:255',
             'origin_lat' => 'nullable|numeric|between:-90,90',
             'origin_lng' => 'nullable|numeric|between:-180,180',
@@ -104,12 +112,13 @@ class RutaController extends Controller
             'estimated_duration_min' => 'nullable|integer|min:0|max:6000',
             'price_per_km' => 'nullable|numeric|min:0|max:100000',
             'estimated_price' => 'nullable|numeric|min:0|max:1000000',
-            'final_price' => 'nullable|numeric|min:0|max:1000000',
+            'final_price' => 'required|numeric|min:0|max:1000000',
             'payment_method' => 'nullable|string|max:50',
             'passenger_count' => 'nullable|integer|min:1|max:20',
             'trip_date' => 'nullable|date',
-            'trip_time' => 'nullable|date_format:H:i',
+            'trip_time' => 'required|date_format:H:i',
             // Cancelar = eliminar (borrado blando, ver destroy): no es un estado editable.
+            // En creación el estado siempre es pending (se fuerza abajo).
             'status' => 'nullable|in:pending,completed',
             'hidden' => 'nullable|boolean',
             'notes' => 'nullable|string|max:2000',
@@ -121,7 +130,9 @@ class RutaController extends Controller
             $validated['estimated_price'] = round((float) $validated['estimated_distance_km'] * (float) $validated['price_per_km'], 2);
         }
 
-        $validated['status'] ??= 'pending';
+        // Las rutas nuevas siempre nacen pendientes; el cliente no elige estado al crear.
+        $validated['status'] = 'pending';
+        $validated['passenger_count'] = $validated['passenger_count'] ?? 1;
 
         $user = $request->user();
 
@@ -141,15 +152,17 @@ class RutaController extends Controller
                     $validated['driver_id'] = $requestedDriverId;
                 }
             } elseif ($requestedOwnerId && $requestedOwnerId !== $user->id) {
-                // Driving for another owner: must have joined their code this month.
-                $month = date('Y-m');
+                // Conducir para otro propietario: código de mes (mes actual) o de jornada (día del viaje).
+                $tripDate = isset($validated['trip_date'])
+                    ? substr((string) $validated['trip_date'], 0, 10)
+                    : now()->toDateString();
                 $isDriverForOwner = \App\Models\OwnerMonthCode::where('owner_id', $requestedOwnerId)
-                    ->where('month', $month)
                     ->whereHas('driverEntries', fn ($q) => $q->where('driver_id', $user->id))
-                    ->exists();
+                    ->get()
+                    ->contains(fn ($code) => $code->authorizesDate($tripDate));
 
                 if (! $isDriverForOwner) {
-                    return response()->json(['message' => 'No estás unido al código de este propietario este mes'], 403);
+                    return response()->json(['message' => 'No estás unido al código de este propietario para esta fecha'], 403);
                 }
 
                 $drivingForAnotherOwner = true;
@@ -201,6 +214,7 @@ class RutaController extends Controller
         $validated['created_by'] = $user?->id;
 
         $ruta = Ruta::create($validated);
+        $ruta->load(self::ATTRIBUTION_WITH);
         $this->attachAutoCompleteEta(collect([$ruta]));
 
         return response()->json($ruta, 201);
@@ -213,6 +227,7 @@ class RutaController extends Controller
             return response()->json([], 403);
         }
 
+        $ruta->load(self::ATTRIBUTION_WITH);
         $this->attachAutoCompleteEta(collect([$ruta]));
 
         return response()->json($ruta);
@@ -220,9 +235,12 @@ class RutaController extends Controller
 
     public function update(Request $request, Ruta $ruta): JsonResponse
     {
+        // Owner/full form: if phone/time/final_price are sent they must be present
+        // and valid. Drivers keep a limited field set (below) so partial updates
+        // (status/payment only) are not forced to send those keys.
         $validated = $request->validate([
             'client_name' => 'sometimes|string|min:2|max:255',
-            'client_phone' => ['sometimes', 'nullable', 'string', 'regex:/^[0-9+\-\s()]{6,20}$/'],
+            'client_phone' => ['sometimes', 'required', 'string', 'regex:/^[0-9+\-\s()]{6,20}$/'],
             'origin' => 'sometimes|string|min:2|max:255',
             'origin_lat' => 'sometimes|nullable|numeric|between:-90,90',
             'origin_lng' => 'sometimes|nullable|numeric|between:-180,180',
@@ -233,11 +251,11 @@ class RutaController extends Controller
             'estimated_duration_min' => 'sometimes|nullable|integer|min:0|max:6000',
             'price_per_km' => 'sometimes|nullable|numeric|min:0|max:100000',
             'estimated_price' => 'sometimes|nullable|numeric|min:0|max:1000000',
-            'final_price' => 'sometimes|nullable|numeric|min:0|max:1000000',
+            'final_price' => 'sometimes|required|numeric|min:0|max:1000000',
             'payment_method' => 'sometimes|nullable|string|max:50',
             'passenger_count' => 'sometimes|nullable|integer|min:1|max:20',
             'trip_date' => 'sometimes|nullable|date',
-            'trip_time' => 'sometimes|nullable|date_format:H:i',
+            'trip_time' => 'sometimes|required|date_format:H:i',
             'status' => 'sometimes|in:pending,completed',
             'notes' => 'sometimes|nullable|string|max:2000',
         ]);
@@ -262,12 +280,19 @@ class RutaController extends Controller
             }
         }
 
-        // Se registra quién completó la ruta solo en la transición hacia
-        // "completed", no en cada edición posterior mientras siga así. Va
-        // después del filtrado de campos por rol para que sobreviva incluso
-        // cuando quien actualiza es el conductor (el caso más común).
-        if ($user && ($validated['status'] ?? null) === 'completed' && $ruta->status !== 'completed') {
+        // Completar (incl. swipe): cada conductor que marca "completed" se
+        // registra en ruta_completions sin borrar las marcas de los demás.
+        // completed_by queda como el último que lo marcó (compatibilidad).
+        $markingCompleted = $user && ($validated['status'] ?? null) === 'completed';
+        if ($markingCompleted) {
             $validated['completed_by'] = $user->id;
+            // Same default as auto-complete / right-swipe: cash when completing with no payment set.
+            $nextPayment = array_key_exists('payment_method', $validated)
+                ? $validated['payment_method']
+                : $ruta->payment_method;
+            if (empty($nextPayment)) {
+                $validated['payment_method'] = 'efectivo';
+            }
         }
 
         // Cualquier edición de una ruta cerrada automáticamente cuenta como
@@ -291,6 +316,12 @@ class RutaController extends Controller
         }
 
         $ruta->update($validated);
+
+        if ($markingCompleted) {
+            $ruta->recordCompletion($user->id);
+        }
+
+        $ruta->load(self::ATTRIBUTION_WITH);
         $this->attachAutoCompleteEta(collect([$ruta]));
 
         return response()->json($ruta);
@@ -340,6 +371,7 @@ class RutaController extends Controller
         // Cancelar y eliminar son lo mismo: queda como "cancelled" y con borrado
         // blando (sigue en los listados, tachado, y se puede deshacer con restore()).
         $ruta->status = 'cancelled';
+        $ruta->cancelled_by = $user->id;
         $ruta->save();
         $ruta->delete();
 
@@ -360,6 +392,7 @@ class RutaController extends Controller
         if ($ruta->trashed()) {
             $ruta->restore();
             $ruta->status = 'pending';
+            $ruta->cancelled_by = null;
             $ruta->save();
         }
 

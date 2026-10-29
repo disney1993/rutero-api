@@ -15,17 +15,29 @@ class DriverCodeController extends Controller
 
         $data = $request->validate([
             'code' => ['required', 'string', 'size:8', 'regex:/^[A-Z0-9]{8}$/i'],
-            'month' => ['required', 'string', 'regex:/^\d{4}-(0[1-9]|1[0-2])$/'],
+            // Opcional (compatibilidad): los códigos de día se validan por valid_on.
+            'month' => ['nullable', 'string', 'regex:/^\d{4}-(0[1-9]|1[0-2])$/'],
         ]);
         $data['code'] = strtoupper($data['code']);
 
-        $ownerCode = OwnerMonthCode::where('code', $data['code'])->where('month', $data['month'])->first();
+        $ownerCode = OwnerMonthCode::where('code', $data['code'])->first();
         if (! $ownerCode) {
             return response()->json(['message' => 'Código inválido'], 422);
         }
 
         if ($ownerCode->owner_id === $user->id) {
             return response()->json(['message' => 'No puedes unirte a tu propio código'], 422);
+        }
+
+        if ($ownerCode->isDay()) {
+            if (! $ownerCode->authorizesDate(now()->toDateString())) {
+                return response()->json(['message' => 'Este código de jornada solo es válido el día indicado'], 422);
+            }
+        } else {
+            $month = $data['month'] ?? now()->format('Y-m');
+            if ($ownerCode->month !== $month || ! $ownerCode->authorizesDate(now()->toDateString())) {
+                return response()->json(['message' => 'Código inválido'], 422);
+            }
         }
 
         $entry = DriverCodeEntry::firstOrCreate([

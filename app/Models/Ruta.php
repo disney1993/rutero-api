@@ -18,6 +18,7 @@ class Ruta extends Model
         'driver_id',
         'created_by',
         'completed_by',
+        'cancelled_by',
         'auto_completed',
         'auto_completed_at',
         'reviewed_at',
@@ -56,10 +57,38 @@ class Ruta extends Model
 
     // Nombrada "completer" (no "completedBy") porque una relación camelCase
     // se serializa como "completed_by" en JSON, lo que chocaría con la
-    // columna cruda del mismo nombre.
+    // columna cruda del mismo nombre. Mismo criterio para creator / canceller.
     public function completer()
     {
         return $this->belongsTo(\App\Models\User::class, 'completed_by');
+    }
+
+    public function creator()
+    {
+        return $this->belongsTo(\App\Models\User::class, 'created_by');
+    }
+
+    public function canceller()
+    {
+        return $this->belongsTo(\App\Models\User::class, 'cancelled_by');
+    }
+
+    public function completions()
+    {
+        return $this->hasMany(RutaCompletion::class);
+    }
+
+    /** Registra (sin borrar a los demás) que este usuario completó la ruta. */
+    public function recordCompletion(int $userId): void
+    {
+        $this->completions()->firstOrCreate(
+            ['user_id' => $userId],
+            ['completed_at' => now()]
+        );
+
+        if ($this->completed_by !== $userId) {
+            $this->forceFill(['completed_by' => $userId])->saveQuietly();
+        }
     }
 
     protected $casts = [
