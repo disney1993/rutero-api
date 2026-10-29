@@ -90,7 +90,7 @@ class RutaApiTest extends TestCase
 
     public function test_it_rejects_out_of_range_coordinates(): void
     {
-        $response = $this->postJson('/api/rutas', [
+        $response = $this->actingAs(\App\Models\User::factory()->create(), 'sanctum')->postJson('/api/rutas', [
             'client_name' => 'Ana García',
             'client_phone' => '612345678',
             'origin' => 'Madrid',
@@ -105,19 +105,22 @@ class RutaApiTest extends TestCase
 
     public function test_it_can_list_rutas_by_status(): void
     {
+        $owner = \App\Models\User::factory()->create();
         \App\Models\Ruta::factory()->create([
+            'owner_id' => $owner->id,
             'client_name' => 'Cliente A',
             'status' => 'pending',
             'trip_date' => '2026-08-25',
         ]);
 
         \App\Models\Ruta::factory()->create([
+            'owner_id' => $owner->id,
             'client_name' => 'Cliente B',
             'status' => 'completed',
             'trip_date' => '2026-08-25',
         ]);
 
-        $response = $this->getJson('/api/rutas?status=pending');
+        $response = $this->actingAs($owner, 'sanctum')->getJson('/api/rutas?status=pending');
 
         $response->assertOk()
             ->assertJsonCount(1, 'data')
@@ -153,8 +156,7 @@ class RutaApiTest extends TestCase
     {
         $victim = \App\Models\User::factory()->create();
 
-        // Sin sesión no hay flota propia: la API rechaza la ruta y no queda
-        // nada a nombre de otro usuario.
+        // Crear exige sesión: sin ella no queda nada a nombre de otro usuario.
         $this->postJson('/api/rutas', [
             'client_name' => 'Ana García',
             'client_phone' => '612345678',
@@ -164,10 +166,19 @@ class RutaApiTest extends TestCase
             'final_price' => 50,
             'owner_id' => $victim->id,
             'driver_id' => $victim->id,
-        ])->assertStatus(422);
+        ])->assertStatus(401);
 
         $this->assertDatabaseMissing('rutas', ['owner_id' => $victim->id]);
         $this->assertDatabaseMissing('rutas', ['driver_id' => $victim->id]);
+    }
+
+    public function test_anonymous_request_cannot_list_rutas(): void
+    {
+        // Antes el listado era público y devolvía los viajes de todos los
+        // usuarios, con nombre y teléfono de sus clientes.
+        \App\Models\Ruta::factory()->create(['owner_id' => \App\Models\User::factory()->create()->id]);
+
+        $this->getJson('/api/rutas')->assertStatus(401)->assertJsonMissingPath('data');
     }
 
     public function test_user_cannot_attribute_ruta_to_owner_without_joining_their_code(): void
@@ -191,7 +202,7 @@ class RutaApiTest extends TestCase
 
     public function test_it_rejects_negative_prices_and_short_addresses(): void
     {
-        $response = $this->postJson('/api/rutas', [
+        $response = $this->actingAs(\App\Models\User::factory()->create(), 'sanctum')->postJson('/api/rutas', [
             'client_name' => 'Ana',
             'client_phone' => '612345678',
             'origin' => 'M',
@@ -207,11 +218,12 @@ class RutaApiTest extends TestCase
 
     public function test_it_can_filter_rutas_by_date_range(): void
     {
-        \App\Models\Ruta::factory()->create(['trip_date' => '2026-08-01']);
-        \App\Models\Ruta::factory()->create(['trip_date' => '2026-08-15']);
-        \App\Models\Ruta::factory()->create(['trip_date' => '2026-09-01']);
+        $owner = \App\Models\User::factory()->create();
+        foreach (['2026-08-01', '2026-08-15', '2026-09-01'] as $date) {
+            \App\Models\Ruta::factory()->create(['owner_id' => $owner->id, 'trip_date' => $date]);
+        }
 
-        $resp = $this->getJson('/api/rutas?date_from=2026-08-01&date_to=2026-08-31');
+        $resp = $this->actingAs($owner, 'sanctum')->getJson('/api/rutas?date_from=2026-08-01&date_to=2026-08-31');
 
         $resp->assertOk()->assertJsonCount(2, 'data');
     }

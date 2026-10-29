@@ -17,9 +17,6 @@ Route::get('/auth/google/redirect', [AuthController::class, 'redirectToGoogle'])
 Route::get('/auth/google/callback', [AuthController::class, 'handleGoogleCallback']);
 Route::post('/auth/google/mobile', [AuthController::class, 'mobileGoogle']);
 
-// Public access for creating/listing rutas (clients)
-Route::apiResource('rutas', RutaController::class)->only(['index','store']);
-
 // Catálogo estático de referencia (marcas/modelos de coches)
 Route::get('/car-catalog/makes', [\App\Http\Controllers\CarCatalogController::class, 'makes']);
 Route::get('/car-catalog/models', [\App\Http\Controllers\CarCatalogController::class, 'models']);
@@ -41,7 +38,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/geocode/search', [\App\Http\Controllers\GeocodingController::class, 'search']);
     Route::get('/geocode/distance', [\App\Http\Controllers\GeocodingController::class, 'distance']);
     // Protected ruta actions: show, update, destroy
-    Route::apiResource('rutas', RutaController::class)->except(['index','store']);
+    // Listar y crear también exigen sesión: sin ella, el listado devolvía los
+    // viajes de todos los usuarios (con nombre y teléfono del cliente).
+    Route::apiResource('rutas', RutaController::class);
     // Marcar como revisado un cierre automático ("Por revisar" → "Correcto")
     Route::post('/rutas/{ruta}/review', [RutaController::class, 'review']);
     // Restaurar un viaje eliminado (borrado blando)
