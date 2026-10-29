@@ -26,7 +26,9 @@ class VehicleFactory extends Factory
             'plate' => strtoupper($this->faker->unique()->bothify('####???')),
             'make' => $make,
             'model' => $model,
-            'color' => $this->faker->safeColorName(),
+            // Hex de la paleta de la app (carColors.js): blanco, negro, gris,
+            // plata, azul, rojo, verde y beige.
+            'color' => $this->faker->randomElement(['#FFFFFF', '#1C1C1C', '#9E9E9E', '#C7C7C7', '#1565C0', '#D32F2F', '#2E7D32', '#D7CCC8']),
             'year' => $this->faker->numberBetween(2012, 2024),
             'seats' => $this->faker->randomElement([4, 5, 7]),
             'vehicle_type' => $this->faker->randomElement(['sedan', 'suv', 'compacto', 'monovolumen']),

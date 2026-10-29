@@ -32,7 +32,7 @@ class VehicleRutaTest extends TestCase
 
         // create ruta using vehicle
         $ruta = $this->withHeaders(['Authorization' => 'Bearer ' . $token])->postJson('/api/rutas', [
-            'client_name' => 'Client', 'origin' => 'Origen A', 'destination' => 'Destino B', 'trip_date' => date('Y-m-d'), 'vehicle_id' => $vehicleId
+            'client_name' => 'Client', 'client_phone' => '612345678', 'final_price' => 20, 'trip_time' => '10:00', 'origin' => 'Origen A', 'destination' => 'Destino B', 'trip_date' => date('Y-m-d'), 'vehicle_id' => $vehicleId
         ]);
         $ruta->assertStatus(201)->assertJson(['vehicle_id' => $vehicleId]);
 
@@ -80,7 +80,7 @@ class VehicleRutaTest extends TestCase
         $freeId = $this->withHeaders($auth)->postJson('/api/vehicles', ['make' => 'Seat', 'model' => 'Ibiza', 'color' => 'Blanco', 'year' => 2020, 'seats' => 5, 'plate' => 'LIB-001', 'vehicle_type' => 'camion'])->json('id');
 
         $this->withHeaders($auth)->postJson('/api/rutas', [
-            'client_name' => 'Cliente', 'origin' => 'Origen', 'destination' => 'Destino', 'vehicle_id' => $withRutaId,
+            'client_name' => 'Cliente', 'client_phone' => '612345678', 'final_price' => 20, 'trip_time' => '10:00', 'origin' => 'Origen', 'destination' => 'Destino', 'vehicle_id' => $withRutaId,
         ])->assertStatus(201);
 
         // El listado indica cuántos viajes tiene cada vehículo.
@@ -94,7 +94,7 @@ class VehicleRutaTest extends TestCase
         $this->withHeaders($auth)->deleteJson("/api/vehicles/{$withRutaId}")
             ->assertStatus(422)->assertJsonPath('message', fn ($m) => str_contains($m, 'viajes'));
         $this->withHeaders($auth)->deleteJson("/api/vehicles/{$freeId}")->assertOk();
-        $this->assertDatabaseMissing('vehicles', ['id' => $freeId]);
+        $this->assertSoftDeleted('vehicles', ['id' => $freeId]);
     }
 
     public function test_plate_is_normalized_to_uppercase_alphanumeric()
@@ -118,6 +118,33 @@ class VehicleRutaTest extends TestCase
             ->assertStatus(422)->assertJsonValidationErrors(['plate']);
     }
 
+    public function test_color_is_stored_as_uppercase_hex()
+    {
+        $token = $this->postJson('/api/register', [
+            'first_name' => 'Owner', 'last_name' => 'Color',
+            'email' => 'ownercolor@example.test', 'password' => 'Secret123!',
+        ])->json('access_token');
+        $auth = ['Authorization' => 'Bearer ' . $token];
+        $base = ['make' => 'Seat', 'model' => 'Ibiza', 'year' => 2020, 'seats' => 5, 'vehicle_type' => 'sedan'];
+
+        $this->withHeaders($auth)->postJson('/api/vehicles', $base + ['plate' => 'COL001', 'color' => '#1565c0'])
+            ->assertStatus(201)->assertJsonPath('color', '#1565C0');
+
+        // Nombres antiguos de la paleta (con o sin tilde) y hex corto se convierten.
+        $this->withHeaders($auth)->postJson('/api/vehicles', $base + ['plate' => 'COL002', 'color' => 'Marrón'])
+            ->assertStatus(201)->assertJsonPath('color', '#5D4037');
+        $id = $this->withHeaders($auth)->postJson('/api/vehicles', $base + ['plate' => 'COL003', 'color' => '#fa0'])
+            ->assertStatus(201)->assertJsonPath('color', '#FFAA00')->json('id');
+
+        $this->withHeaders($auth)->putJson("/api/vehicles/{$id}", $base + ['plate' => 'COL003', 'color' => 'blanco'])
+            ->assertOk()->assertJsonPath('color', '#FFFFFF');
+
+        foreach (['verde pistacho', '#12345G', '#1234567'] as $invalid) {
+            $this->withHeaders($auth)->postJson('/api/vehicles', $base + ['plate' => 'COL009', 'color' => $invalid])
+                ->assertStatus(422)->assertJsonValidationErrors(['color']);
+        }
+    }
+
     public function test_ruta_delete_is_soft_and_can_be_restored()
     {
         $token = $this->postJson('/api/register', [
@@ -131,7 +158,7 @@ class VehicleRutaTest extends TestCase
             'plate' => 'SOFT001', 'make' => 'Seat', 'model' => 'Ibiza', 'color' => 'Blanco', 'year' => 2020, 'seats' => 5, 'vehicle_type' => 'sedan',
         ])->json('id');
         $rutaId = $this->withHeaders($auth)->postJson('/api/rutas', [
-            'client_name' => 'Cliente', 'origin' => 'Origen', 'destination' => 'Destino', 'trip_date' => $date, 'vehicle_id' => $vehicleId,
+            'client_name' => 'Cliente', 'client_phone' => '612345678', 'final_price' => 20, 'trip_time' => '10:00', 'origin' => 'Origen', 'destination' => 'Destino', 'trip_date' => $date, 'vehicle_id' => $vehicleId,
         ])->assertStatus(201)->json('id');
 
         $this->withHeaders($auth)->deleteJson("/api/rutas/{$rutaId}")->assertOk();

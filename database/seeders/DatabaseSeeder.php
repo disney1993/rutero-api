@@ -37,7 +37,7 @@ class DatabaseSeeder extends Seeder
                 'avatar' => 'http://example.com/owner.png',
                 'password' => 'secret123',
                 'role' => 'user',
-                'price_per_km' => 0.75,
+                'price_per_km' => 1.25,
             ]
         );
 
@@ -47,7 +47,7 @@ class DatabaseSeeder extends Seeder
                 'owner_id' => $owner->id,
                 'make' => 'Toyota',
                 'model' => 'Corolla',
-                'color' => 'Blanco',
+                'color' => '#FFFFFF',
                 'year' => 2020,
                 'seats' => 4,
                 'vehicle_type' => 'sedan',
@@ -63,7 +63,7 @@ class DatabaseSeeder extends Seeder
                 'avatar' => 'http://example.com/driver.png',
                 'password' => 'secret123',
                 'role' => 'user',
-                'price_per_km' => 0.75,
+                'price_per_km' => 1.25,
             ]
         );
 

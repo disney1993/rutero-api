@@ -52,11 +52,25 @@ class AdminUserManagementTest extends TestCase
 
         $this->app['auth']->forgetGuards();
         $resp = $this->withHeader('Authorization', "Bearer $adminToken")
-            ->patchJson("/api/admin/users/{$userId}", ['role' => 'admin', 'plan' => 'premium']);
+            ->patchJson("/api/admin/users/{$userId}", ['first_name' => 'Nuevo', 'plan' => 'premium']);
 
         $resp->assertStatus(200)
-            ->assertJsonPath('role', 'admin')
+            ->assertJsonPath('first_name', 'Nuevo')
+            ->assertJsonPath('role', 'user')
             ->assertJsonPath('plan', 'premium');
+    }
+
+    public function test_admin_cannot_promote_user_to_admin_from_panel()
+    {
+        $adminToken = $this->makeAdmin();
+        [, $userId] = $this->registerAndToken(['email' => 'target@example.test']);
+
+        $this->app['auth']->forgetGuards();
+        $this->withHeader('Authorization', "Bearer $adminToken")
+            ->patchJson("/api/admin/users/{$userId}", ['role' => 'admin'])
+            ->assertStatus(422);
+
+        $this->assertDatabaseHas('users', ['id' => $userId, 'role' => 'user']);
     }
 
     public function test_update_user_rejects_invalid_role_and_duplicate_email()
@@ -78,18 +92,21 @@ class AdminUserManagementTest extends TestCase
         [$ownerToken, $ownerId] = $this->registerAndToken(['email' => 'ownerdel@example.test']);
 
         $this->app['auth']->forgetGuards();
-        $this->withHeader('Authorization', "Bearer $ownerToken")
-            ->postJson('/api/vehicles', ['make' => 'Seat', 'model' => 'Ibiza', 'color' => 'Blanco', 'year' => 2020, 'seats' => 5, 'plate' => 'DEL-001', 'vehicle_type' => 'sedan'])->assertStatus(201);
-        $this->withHeader('Authorization', "Bearer $ownerToken")
-            ->postJson('/api/rutas', ['client_name' => 'Cliente', 'origin' => 'Origen', 'destination' => 'Destino'])
-            ->assertStatus(201);
+        $vehicleId = $this->withHeader('Authorization', "Bearer $ownerToken")
+            ->postJson('/api/vehicles', ['make' => 'Seat', 'model' => 'Ibiza', 'color' => 'Blanco', 'year' => 2020, 'seats' => 5, 'plate' => 'DEL-001', 'vehicle_type' => 'sedan'])->assertStatus(201)->json('id');
+        $rutaId = $this->withHeader('Authorization', "Bearer $ownerToken")
+            ->postJson('/api/rutas', ['client_name' => 'Cliente', 'client_phone' => '612345678', 'final_price' => 20, 'trip_time' => '10:00', 'origin' => 'Origen', 'destination' => 'Destino', 'vehicle_id' => $vehicleId])
+            ->assertStatus(201)->json('id');
 
         $this->app['auth']->forgetGuards();
         $resp = $this->withHeader('Authorization', "Bearer $adminToken")->deleteJson("/api/admin/users/{$ownerId}");
         $resp->assertStatus(200);
 
-        $this->assertDatabaseMissing('users', ['id' => $ownerId]);
-        $this->assertDatabaseMissing('rutas', ['owner_id' => $ownerId]);
+        // Borrado blando: usuario, sus viajes y su flota quedan marcados
+        // (deleted_at) en vez de desaparecer de la base de datos.
+        $this->assertSoftDeleted('users', ['id' => $ownerId]);
+        $this->assertSoftDeleted('rutas', ['id' => $rutaId]);
+        $this->assertSoftDeleted('vehicles', ['id' => $vehicleId]);
     }
 
     public function test_admin_cannot_delete_their_own_account()
@@ -131,7 +148,7 @@ class AdminUserManagementTest extends TestCase
 
         $this->app['auth']->forgetGuards();
         $ruta = $this->withHeader('Authorization', "Bearer $driverToken")->postJson('/api/rutas', [
-            'client_name' => 'Cliente', 'origin' => 'Origen', 'destination' => 'Destino', 'owner_id' => $ownerId,
+            'client_name' => 'Cliente', 'client_phone' => '612345678', 'final_price' => 20, 'trip_time' => '10:00', 'origin' => 'Origen', 'destination' => 'Destino', 'owner_id' => $ownerId,
         ]);
         $ruta->assertStatus(201);
         $rutaId = $ruta->json('id');

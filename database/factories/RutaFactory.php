@@ -75,7 +75,7 @@ class RutaFactory extends Factory
             'price_per_km' => $pricePerKm,
             'estimated_price' => $estimatedPrice,
             'final_price' => $status === 'completed' ? round($estimatedPrice / 5) * 5 : null,
-            'payment_method' => $status === 'completed' ? $this->faker->randomElement(['efectivo', 'tarjeta', 'transferencia']) : null,
+            'payment_method' => $status === 'completed' ? $this->faker->randomElement(['efectivo', 'tarjeta', 'bizum']) : null,
             'passenger_count' => $this->faker->numberBetween(1, 4),
             'trip_date' => $this->faker->dateTimeBetween('-7 days', '+10 days')->format('Y-m-d'),
             'trip_time' => sprintf('%02d:%02d', $this->faker->numberBetween(6, 22), $this->faker->randomElement(self::MINUTES)),

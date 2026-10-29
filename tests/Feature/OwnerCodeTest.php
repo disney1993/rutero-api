@@ -55,7 +55,7 @@ class OwnerCodeTest extends TestCase
 
         // Driving for the owner they just joined creates a ruta attributed to that owner.
         $ruta = $this->withHeaders(['Authorization' => 'Bearer ' . $dtoken])->postJson('/api/rutas', [
-            'client_name' => 'Cliente',
+            'client_name' => 'Cliente', 'client_phone' => '612345678', 'final_price' => 20, 'trip_time' => '10:00',
             'origin' => 'Origen A',
             'destination' => 'Destino B',
             'trip_date' => date('Y-m-d'),
@@ -93,14 +93,14 @@ class OwnerCodeTest extends TestCase
         $this->app['auth']->forgetGuards();
         // Ruta the driver creates themselves while driving for the owner.
         $ownRuta = $this->withHeaders(['Authorization' => 'Bearer ' . $dtoken])->postJson('/api/rutas', [
-            'client_name' => 'Cliente', 'origin' => 'Origen', 'destination' => 'Destino', 'owner_id' => $ownerId,
+            'client_name' => 'Cliente', 'client_phone' => '612345678', 'final_price' => 20, 'trip_time' => '10:00', 'origin' => 'Origen', 'destination' => 'Destino', 'owner_id' => $ownerId,
         ]);
         $ownRuta->assertStatus(201);
 
         $this->app['auth']->forgetGuards();
         // Ruta the owner creates and assigns to the driver directly.
         $assignedRuta = $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])->postJson('/api/rutas', [
-            'client_name' => 'Cliente 2', 'origin' => 'Origen', 'destination' => 'Destino',
+            'client_name' => 'Cliente 2', 'client_phone' => '612345678', 'final_price' => 20, 'trip_time' => '10:00', 'origin' => 'Origen', 'destination' => 'Destino',
             'driver_id' => $driverId, 'vehicle_id' => $vehicleId,
         ]);
         $assignedRuta->assertStatus(201);
@@ -179,7 +179,7 @@ class OwnerCodeTest extends TestCase
 
         $this->app['auth']->forgetGuards();
         $this->withHeaders(['Authorization' => 'Bearer ' . $dtoken])->postJson('/api/rutas', [
-            'client_name' => 'Cliente día',
+            'client_name' => 'Cliente día', 'client_phone' => '612345678', 'final_price' => 20, 'trip_time' => '10:00',
             'origin' => 'Origen',
             'destination' => 'Destino',
             'trip_date' => $today,

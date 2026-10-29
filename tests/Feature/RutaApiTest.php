@@ -9,6 +9,23 @@ class RutaApiTest extends TestCase
 {
     use RefreshDatabase;
 
+    // Crear una ruta exige un vehículo de la flota de quien la crea, así que
+    // los tests de creación usan un propietario autenticado con un coche.
+    private function ownerWithVehicle(string $email = 'owner-ruta@example.test'): array
+    {
+        $token = $this->postJson('/api/register', [
+            'first_name' => 'Owner', 'last_name' => 'Ruta',
+            'email' => $email, 'password' => 'Secret123!',
+        ])->json('access_token');
+        $headers = ['Authorization' => 'Bearer ' . $token];
+        $vehicleId = $this->withHeaders($headers)->postJson('/api/vehicles', [
+            'plate' => 'RUT001', 'make' => 'Seat', 'model' => 'Ibiza', 'color' => '#FFFFFF',
+            'year' => 2020, 'seats' => 5, 'vehicle_type' => 'sedan',
+        ])->assertStatus(201)->json('id');
+
+        return [$headers, $vehicleId];
+    }
+
     public function test_health_endpoint_returns_ok(): void
     {
         $response = $this->getJson('/api/health');
@@ -21,7 +38,9 @@ class RutaApiTest extends TestCase
 
     public function test_it_can_create_a_ruta(): void
     {
+        [$headers, $vehicleId] = $this->ownerWithVehicle();
         $payload = [
+            'vehicle_id' => $vehicleId,
             'client_name' => 'Ana García',
             'client_phone' => '+34123456789',
             'origin' => 'Madrid',
@@ -38,7 +57,7 @@ class RutaApiTest extends TestCase
             'notes' => 'Vuelo temprano',
         ];
 
-        $response = $this->postJson('/api/rutas', $payload);
+        $response = $this->withHeaders($headers)->postJson('/api/rutas', $payload);
 
         $response->assertCreated()
             ->assertJsonPath('client_name', 'Ana García')
@@ -47,7 +66,9 @@ class RutaApiTest extends TestCase
 
     public function test_it_saves_origin_and_destination_coordinates(): void
     {
+        [$headers, $vehicleId] = $this->ownerWithVehicle();
         $payload = [
+            'vehicle_id' => $vehicleId,
             'client_name' => 'Ana García',
             'client_phone' => '612345678',
             'origin' => 'Madrid',
@@ -60,7 +81,7 @@ class RutaApiTest extends TestCase
             'final_price' => 80,
         ];
 
-        $response = $this->postJson('/api/rutas', $payload);
+        $response = $this->withHeaders($headers)->postJson('/api/rutas', $payload);
 
         $response->assertCreated()
             ->assertJsonPath('origin_lat', 40.4168)
@@ -105,7 +126,9 @@ class RutaApiTest extends TestCase
 
     public function test_it_calculates_estimated_price_when_missing(): void
     {
+        [$headers, $vehicleId] = $this->ownerWithVehicle();
         $payload = [
+            'vehicle_id' => $vehicleId,
             'client_name' => 'Pedro López',
             'client_phone' => '698765432',
             'origin' => 'Sevilla',
@@ -120,7 +143,7 @@ class RutaApiTest extends TestCase
             'trip_time' => '11:15',
         ];
 
-        $response = $this->postJson('/api/rutas', $payload);
+        $response = $this->withHeaders($headers)->postJson('/api/rutas', $payload);
 
         $response->assertCreated()
             ->assertJsonPath('estimated_price', 210);
@@ -130,7 +153,9 @@ class RutaApiTest extends TestCase
     {
         $victim = \App\Models\User::factory()->create();
 
-        $response = $this->postJson('/api/rutas', [
+        // Sin sesión no hay flota propia: la API rechaza la ruta y no queda
+        // nada a nombre de otro usuario.
+        $this->postJson('/api/rutas', [
             'client_name' => 'Ana García',
             'client_phone' => '612345678',
             'origin' => 'Madrid',
@@ -139,11 +164,29 @@ class RutaApiTest extends TestCase
             'final_price' => 50,
             'owner_id' => $victim->id,
             'driver_id' => $victim->id,
-        ]);
+        ])->assertStatus(422);
 
-        $response->assertCreated();
-        $this->assertNull($response->json('owner_id'));
-        $this->assertNull($response->json('driver_id'));
+        $this->assertDatabaseMissing('rutas', ['owner_id' => $victim->id]);
+        $this->assertDatabaseMissing('rutas', ['driver_id' => $victim->id]);
+    }
+
+    public function test_user_cannot_attribute_ruta_to_owner_without_joining_their_code(): void
+    {
+        $victim = \App\Models\User::factory()->create();
+        [$headers, $vehicleId] = $this->ownerWithVehicle();
+
+        $this->withHeaders($headers)->postJson('/api/rutas', [
+            'client_name' => 'Ana García',
+            'client_phone' => '612345678',
+            'origin' => 'Madrid',
+            'destination' => 'Toledo',
+            'trip_time' => '09:00',
+            'final_price' => 50,
+            'vehicle_id' => $vehicleId,
+            'owner_id' => $victim->id,
+        ])->assertStatus(403);
+
+        $this->assertDatabaseMissing('rutas', ['owner_id' => $victim->id]);
     }
 
     public function test_it_rejects_negative_prices_and_short_addresses(): void

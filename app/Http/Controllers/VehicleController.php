@@ -33,13 +33,14 @@ class VehicleController extends Controller
         if (! $user) return response()->json([], 401);
 
         $this->normalizePlate($request);
+        $this->normalizeColor($request);
 
         // Todo obligatorio salvo las notas (igual en update).
         $data = $request->validate([
             'plate' => ['required', 'string', 'max:12', 'regex:/^[A-Z0-9]+$/', 'unique:vehicles,plate'],
             'make' => 'required|string|max:100',
             'model' => 'required|string|max:100',
-            'color' => 'required|string|max:50',
+            'color' => ['required', 'string', 'regex:/^#[0-9A-F]{6}$/'],
             'year' => 'required|integer|min:1950|max:' . (date('Y') + 1),
             'seats' => 'required|integer|min:1|max:90',
             'vehicle_type' => ['required', 'string', Rule::in(Vehicle::TYPES)],
@@ -82,12 +83,13 @@ class VehicleController extends Controller
         if (! $user->isAdmin() && $vehicle->owner_id !== $user->id) return response()->json([], 403);
 
         $this->normalizePlate($request);
+        $this->normalizeColor($request);
 
         $data = $request->validate([
             'plate' => ['required', 'string', 'max:12', 'regex:/^[A-Z0-9]+$/', 'unique:vehicles,plate,' . $vehicle->id],
             'make' => 'required|string|max:100',
             'model' => 'required|string|max:100',
-            'color' => 'required|string|max:50',
+            'color' => ['required', 'string', 'regex:/^#[0-9A-F]{6}$/'],
             'year' => 'required|integer|min:1950|max:' . (date('Y') + 1),
             'seats' => 'required|integer|min:1|max:90',
             'vehicle_type' => ['required', 'string', Rule::in(Vehicle::TYPES)],
@@ -137,6 +139,17 @@ class VehicleController extends Controller
     // La matrícula se guarda solo con letras y números en mayúsculas: se
     // quitan espacios, guiones y demás antes de validar, así "1234-abc" y
     // "1234 ABC" son la misma matrícula (y la regla unique lo detecta).
+    // El color se guarda como hex "#RRGGBB". Un nombre conocido ("Blanco")
+    // o un hex corto se convierten antes de validar; cualquier otra cosa se
+    // deja tal cual para que la validación la rechace.
+    private function normalizeColor(Request $request): void
+    {
+        if ($request->has('color') && is_string($request->input('color'))) {
+            $hex = Vehicle::normalizeColor($request->input('color'));
+            if ($hex) $request->merge(['color' => $hex]);
+        }
+    }
+
     private function normalizePlate(Request $request): void
     {
         if ($request->has('plate') && is_string($request->input('plate'))) {
