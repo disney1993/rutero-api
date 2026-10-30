@@ -17,4 +17,12 @@ return [
         'margin_pct' => 10,
         'default_duration_min' => 60,
     ],
+
+    // Contraseñas de las cuentas de demo que crea DatabaseSeeder. En producción
+    // son obligatorias (mín. 12 caracteres): el seeder se niega a correr sin
+    // ellas para no dejar cuentas con contraseñas conocidas del repositorio.
+    'seed' => [
+        'admin_password' => env('SEED_ADMIN_PASSWORD'),
+        'demo_password' => env('SEED_DEMO_PASSWORD'),
+    ],
 ];

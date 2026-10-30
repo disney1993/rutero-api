@@ -147,6 +147,9 @@ class DemoDataSeeder extends Seeder
                 'name' => "{$firstName} {$lastName}",
                 'avatar_color' => AvatarPalette::random(),
                 'price_per_km' => $faker->randomFloat(2, 1.05, 1.45),
+                // La factory les pone "password"; en producción, una aleatoria
+                // que nadie conoce (son cuentas de relleno, no para entrar).
+                ...(app()->isProduction() ? ['password' => Str::random(40)] : []),
             ])->save();
 
             // Unos pocos se quedan sin flota para ver también ese caso.

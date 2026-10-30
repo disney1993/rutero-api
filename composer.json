@@ -8,6 +8,7 @@
     "require": {
         "php": "^8.2",
         "barryvdh/laravel-dompdf": "^3.1",
+        "fakerphp/faker": "^1.23",
         "laravel/framework": "^12.0",
         "laravel/sanctum": "^4.2",
         "laravel/socialite": "^5.23",
@@ -15,7 +16,6 @@
         "phpoffice/phpspreadsheet": "^5.10"
     },
     "require-dev": {
-        "fakerphp/faker": "^1.23",
         "laravel/pail": "^1.2.2",
         "laravel/pint": "^1.24",
         "laravel/sail": "^1.41",
