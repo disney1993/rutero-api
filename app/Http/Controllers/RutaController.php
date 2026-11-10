@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Jornada;
 use App\Models\OwnerDriver;
 use App\Models\OwnerMonthCode;
 use App\Models\Ruta;
@@ -129,6 +130,7 @@ class RutaController extends Controller
             'notes' => 'nullable|string|max:2000',
             'owner_id' => 'nullable|integer|exists:users,id',
             'driver_id' => 'nullable|integer|exists:users,id',
+            'jornada_id' => 'nullable|integer',
         ]);
 
         if (empty($validated['estimated_price']) && ! empty($validated['estimated_distance_km']) && ! empty($validated['price_per_km'])) {
@@ -145,7 +147,11 @@ class RutaController extends Controller
         // not be able to attribute a ruta to an arbitrary user's account.
         $requestedOwnerId = $validated['owner_id'] ?? null;
         $requestedDriverId = $validated['driver_id'] ?? null;
-        unset($validated['owner_id'], $validated['driver_id']);
+        $requestedJornadaId = $validated['jornada_id'] ?? null;
+        unset($validated['owner_id'], $validated['driver_id'], $validated['jornada_id']);
+        $tripDay = isset($validated['trip_date'])
+            ? substr((string) $validated['trip_date'], 0, 10)
+            : now(config('rutero.auto_complete.timezone'))->toDateString();
 
         $drivingForAnotherOwner = false;
 
@@ -174,15 +180,31 @@ class RutaController extends Controller
                 $drivingForAnotherOwner = true;
                 $validated['owner_id'] = $requestedOwnerId;
                 $validated['driver_id'] = $user->id;
+                // Su jornada de ese día (la indicada si es suya, o en la que conduce).
+                $jornada = $this->resolveJornada($requestedOwnerId, $tripDay, $requestedJornadaId, $user->id);
+                if ($jornada === false) {
+                    return response()->json(['message' => 'La jornada no es de ese propietario o de ese día'], 422);
+                }
+                $validated['jornada_id'] = $jornada?->id;
             } else {
                 // Creating a ruta for their own fleet.
                 if (! $user->hasOwnerCapability()) {
                     return response()->json(['message' => 'Necesitas al menos un vehículo para crear rutas'], 403);
                 }
                 $validated['owner_id'] = $user->id;
-                // Si no se indica conductor, se usa el predeterminado del equipo.
+                // Jornada del viaje: la indicada o la primera del día. Si no se
+                // indica conductor o vehículo, se heredan de la jornada; sin
+                // jornada, se usa el conductor predeterminado del equipo.
+                $jornada = $this->resolveJornada($user->id, $tripDay, $requestedJornadaId);
+                if ($jornada === false) {
+                    return response()->json(['message' => 'La jornada no es tuya o no es de ese día'], 422);
+                }
+                $validated['jornada_id'] = $jornada?->id;
                 if (! $request->has('driver_id')) {
-                    $requestedDriverId = OwnerDriver::defaultDriverId($user->id);
+                    $requestedDriverId = $jornada ? $jornada->driver_id : OwnerDriver::defaultDriverId($user->id);
+                }
+                if ($jornada && empty($validated['vehicle_id'])) {
+                    $validated['vehicle_id'] = $jornada->vehicle_id;
                 }
                 // Asignar el viaje a un conductor de su equipo (null = lo hace él).
                 if ($requestedDriverId && $requestedDriverId !== $user->id) {
@@ -276,6 +298,7 @@ class RutaController extends Controller
             'status' => 'sometimes|in:pending,completed',
             'notes' => 'sometimes|nullable|string|max:2000',
             'driver_id' => 'sometimes|nullable|integer',
+            'jornada_id' => 'sometimes|nullable|integer',
         ]);
 
         if (empty($validated['estimated_price']) && ! empty($ruta->estimated_distance_km) && ! empty($ruta->price_per_km)) {
@@ -287,6 +310,28 @@ class RutaController extends Controller
         $isOwner = $user && ($user->isAdmin() || $ruta->owner_id === $user->id);
         if (! $isOwner && (! $user || ! $this->driverCanAccess($ruta, $user))) {
             return response()->json([], 403);
+        }
+
+        // Mover de jornada (solo el propietario): a otra del mismo día, o a la
+        // primera del nuevo día si cambia la fecha sin indicar jornada.
+        if ($isOwner && (array_key_exists('jornada_id', $validated) || array_key_exists('trip_date', $validated))) {
+            $day = substr((string) ($validated['trip_date'] ?? $ruta->trip_date?->toDateString() ?? ''), 0, 10);
+            $requested = array_key_exists('jornada_id', $validated)
+                ? $validated['jornada_id']
+                : ($ruta->jornada_id && $ruta->jornada?->date->toDateString() === $day ? $ruta->jornada_id : null);
+            $jornada = $day ? $this->resolveJornada($ruta->owner_id, $day, $requested) : null;
+            if ($jornada === false) {
+                return response()->json(['message' => 'La jornada no es tuya o no es de ese día'], 422);
+            }
+            $validated['jornada_id'] = $jornada?->id;
+            // Un viaje pendiente que cambia de jornada pasa al conductor de la
+            // nueva, salvo que la petición indique otro.
+            if ($jornada && $jornada->id !== $ruta->jornada_id && ! array_key_exists('driver_id', $validated)
+                && ($validated['status'] ?? $ruta->status) === 'pending') {
+                $validated['driver_id'] = $jornada->driver_id;
+            }
+        } else {
+            unset($validated['jornada_id']);
         }
 
         // Reasignar conductor: solo el propietario y solo a alguien de su equipo.
@@ -445,6 +490,27 @@ class RutaController extends Controller
         return $ruta->created_by === $user->id
             || OwnerDriver::isActive($ruta->owner_id, $user->id)
             || ($ruta->trip_date && $ruta->trip_date->toDateString() < $today);
+    }
+
+    /**
+     * Jornada de un viaje: la pedida, si es del propietario y del mismo día
+     * (false si no lo es); si no se pide, la del conductor $driverId ese día o
+     * la primera del día; null si el día no tiene jornadas.
+     */
+    private function resolveJornada(int $ownerId, string $day, ?int $requestedId, ?int $driverId = null): Jornada|false|null
+    {
+        if ($requestedId) {
+            $jornada = Jornada::where('id', $requestedId)->where('owner_id', $ownerId)->first();
+
+            return $jornada && $jornada->date->toDateString() === $day ? $jornada : false;
+        }
+
+        $query = Jornada::where('owner_id', $ownerId)->whereDate('date', $day)->orderBy('position');
+        if ($driverId) {
+            return (clone $query)->where('driver_id', $driverId)->first() ?? $query->first();
+        }
+
+        return $query->first();
     }
 
     /** Viaje sin asignar de un propietario de su equipo, desde que se unió. */

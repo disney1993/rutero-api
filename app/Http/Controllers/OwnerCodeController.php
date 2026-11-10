@@ -65,7 +65,7 @@ class OwnerCodeController extends Controller
             ]);
         }
 
-        $code = strtoupper(Str::random(8));
+        $code = \App\Support\ShareCode::generate();
         $entry = OwnerMonthCode::create([
             'owner_id' => $user->id,
             'code' => $code,

@@ -23,6 +23,7 @@ class Ruta extends Model
         'auto_completed_at',
         'reviewed_at',
         'vehicle_id',
+        'jornada_id',
         'client_name',
         'client_phone',
         'origin',
@@ -44,6 +45,11 @@ class Ruta extends Model
         'hidden',
         'notes',
     ];
+
+    public function jornada()
+    {
+        return $this->belongsTo(\App\Models\Jornada::class, 'jornada_id');
+    }
 
     public function owner()
     {

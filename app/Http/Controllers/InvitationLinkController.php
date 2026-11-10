@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Jornada;
 use App\Models\OwnerDriver;
 use App\Models\OwnerMonthCode;
 use App\Models\User;
@@ -41,6 +42,15 @@ class InvitationLinkController extends Controller
             ];
         }
 
+        $shift = Jornada::where('code', $code)->with('owner:id,first_name,last_name')->first();
+        if ($shift) {
+            return $shift->isJoinable() ? [
+                'type' => 'jornada', 'owner' => $shift->owner, 'valid_on' => $shift->date->toDateString(),
+                'month' => null, 'expires_at' => null, 'label' => $shift->label,
+                'has_driver' => $shift->driver_id !== null,
+            ] : null;
+        }
+
         $jornada = OwnerMonthCode::where('code', $code)->with('owner:id,first_name,last_name')->first();
         if ($jornada && $jornada->isJoinable()) {
             return [
@@ -63,7 +73,7 @@ class InvitationLinkController extends Controller
 
         $ownerName = $info ? trim($info['owner']->first_name.' '.$info['owner']->last_name) : null;
         $headline = match ($info['type'] ?? null) {
-            'day' => "$ownerName te invita a su jornada del ".date('d/m/Y', strtotime($info['valid_on'])),
+            'day', 'jornada' => "$ownerName te invita a su jornada del ".date('d/m/Y', strtotime($info['valid_on'])),
             'month' => "$ownerName te invita a sus jornadas de ".date('m/Y', strtotime($info['month'].'-01')),
             'team' => "$ownerName te invita a su equipo",
             default => null,
@@ -102,6 +112,7 @@ class InvitationLinkController extends Controller
             ],
             'valid_on' => $info['valid_on'],
             'month' => $info['month'],
+            'label' => $info['label'] ?? null,
             'expires_at' => $info['expires_at'],
         ]);
     }

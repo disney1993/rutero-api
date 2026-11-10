@@ -4,7 +4,6 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Str;
 
 /**
  * Vínculo propietario-conductor (equipo).
@@ -100,14 +99,7 @@ class OwnerDriver extends Model
      */
     public static function newInviteCode(): string
     {
-        do {
-            $code = strtoupper(Str::random(8));
-        } while (
-            static::where('invite_code', $code)->exists()
-            || OwnerMonthCode::where('code', $code)->exists()
-        );
-
-        return $code;
+        return \App\Support\ShareCode::generate();
     }
 
     /**

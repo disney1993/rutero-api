@@ -68,6 +68,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/me/invitations/{link}/reject', [\App\Http\Controllers\TeamController::class, 'reject']);
     Route::get('/me/owners', [\App\Http\Controllers\TeamController::class, 'myOwners']);
 
+    // Jornadas del propietario (varias por día, con conductor, vehículo y código)
+    Route::get('/jornadas', [\App\Http\Controllers\JornadaController::class, 'index']);
+    Route::post('/jornadas', [\App\Http\Controllers\JornadaController::class, 'store']);
+    Route::patch('/jornadas/{jornada}', [\App\Http\Controllers\JornadaController::class, 'update']);
+    Route::delete('/jornadas/{jornada}', [\App\Http\Controllers\JornadaController::class, 'destroy']);
+    Route::post('/jornadas/{jornada}/code', [\App\Http\Controllers\JornadaController::class, 'regenerateCode']);
+
     // Drivers joining codes
     Route::post('/driver/join-code', [\App\Http\Controllers\DriverCodeController::class, 'join'])->middleware('throttle:10,1');
     Route::get('/driver/my-codes', [\App\Http\Controllers\DriverCodeController::class, 'listMyCodes']);

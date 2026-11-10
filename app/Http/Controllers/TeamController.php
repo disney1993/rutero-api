@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Jornada;
 use App\Models\OwnerDriver;
+use App\Models\Ruta;
 use App\Models\User;
 use App\Models\Vehicle;
 use Illuminate\Http\JsonResponse;
@@ -160,6 +162,16 @@ class TeamController extends Controller
             'invite_code' => null,
             'is_default' => false,
         ]);
+
+        // Sus jornadas y viajes pendientes desde hoy quedan sin conductor, para
+        // que el propietario los reasigne (o los vea el resto del equipo).
+        if ($link->driver_id) {
+            $today = now(config('rutero.auto_complete.timezone'))->toDateString();
+            Jornada::where('owner_id', $link->owner_id)->where('driver_id', $link->driver_id)
+                ->whereDate('date', '>=', $today)->update(['driver_id' => null]);
+            Ruta::where('owner_id', $link->owner_id)->where('driver_id', $link->driver_id)
+                ->where('status', 'pending')->whereDate('trip_date', '>=', $today)->update(['driver_id' => null]);
+        }
 
         return response()->json(['message' => 'Vínculo eliminado']);
     }
