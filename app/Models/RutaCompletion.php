@@ -10,6 +10,7 @@ class RutaCompletion extends Model
         'ruta_id',
         'user_id',
         'completed_at',
+        'source',
     ];
 
     protected $casts = [

@@ -24,6 +24,11 @@ Route::get('/car-catalog/models', [\App\Http\Controllers\CarCatalogController::c
 // Tarifas interurbanas de taxi por comunidad autónoma (referencia para el precio/km)
 Route::get('/reference/taxi-tariffs', [\App\Http\Controllers\TaxiTariffController::class, 'index']);
 
+// Quién invita (enlace /i/{código}), para que la app lo muestre antes de unirse.
+Route::get('/invitations/{code}', [\App\Http\Controllers\InvitationLinkController::class, 'info'])
+    ->middleware('throttle:30,1')
+    ->where('code', '[A-Za-z0-9]{8}');
+
 // Rutas protegidas con Sanctum (owner/driver/admin)
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', [AuthController::class, 'userProfile']);
@@ -53,8 +58,18 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/owner/codes', [\App\Http\Controllers\OwnerCodeController::class, 'store']);
     Route::delete('/owner/codes/{ownerMonthCode}', [\App\Http\Controllers\OwnerCodeController::class, 'destroy']);
 
+    // Equipo: propietario y sus conductores (vínculo persistente con consentimiento)
+    Route::get('/team', [\App\Http\Controllers\TeamController::class, 'index']);
+    Route::post('/team/invitations', [\App\Http\Controllers\TeamController::class, 'invite'])->middleware('throttle:10,1');
+    Route::patch('/team/{link}', [\App\Http\Controllers\TeamController::class, 'update']);
+    Route::delete('/team/{link}', [\App\Http\Controllers\TeamController::class, 'destroy']);
+    Route::get('/me/invitations', [\App\Http\Controllers\TeamController::class, 'myInvitations']);
+    Route::post('/me/invitations/{link}/accept', [\App\Http\Controllers\TeamController::class, 'accept']);
+    Route::post('/me/invitations/{link}/reject', [\App\Http\Controllers\TeamController::class, 'reject']);
+    Route::get('/me/owners', [\App\Http\Controllers\TeamController::class, 'myOwners']);
+
     // Drivers joining codes
-    Route::post('/driver/join-code', [\App\Http\Controllers\DriverCodeController::class, 'join']);
+    Route::post('/driver/join-code', [\App\Http\Controllers\DriverCodeController::class, 'join'])->middleware('throttle:10,1');
     Route::get('/driver/my-codes', [\App\Http\Controllers\DriverCodeController::class, 'listMyCodes']);
 
     // Admin oversight

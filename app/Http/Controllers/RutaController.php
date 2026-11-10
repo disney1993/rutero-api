@@ -2,8 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\OwnerDriver;
+use App\Models\OwnerMonthCode;
 use App\Models\Ruta;
 use App\Models\User;
+use App\Models\Vehicle;
 use App\Services\RutaAutoCompleter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -12,6 +15,7 @@ class RutaController extends Controller
 {
     /** Attribution users for list/edit meta (names + avatar tint). */
     private const ATTRIBUTION_WITH = [
+        'driver:id,first_name,last_name,avatar_color,avatar',
         'completer:id,first_name,last_name,avatar_color',
         'creator:id,first_name,last_name,avatar_color',
         'canceller:id,first_name,last_name,avatar_color',
@@ -43,7 +47,8 @@ class RutaController extends Controller
         // Authorization: admin sees all, everyone else sees rutas they own or drive.
         if ($user && ! $user->isAdmin()) {
             $query->where(function ($q) use ($user) {
-                $q->where('owner_id', $user->id)->orWhere('driver_id', $user->id);
+                $q->where('owner_id', $user->id)
+                    ->orWhere(fn ($q) => $this->scopeDriverAccess($q, $user));
             });
         }
 
@@ -79,7 +84,7 @@ class RutaController extends Controller
         // Búsqueda por nombre de cliente, p.ej. para encontrar una ruta
         // concreta desde "Jornada" sin navegar día a día.
         if ($request->filled('search')) {
-            $query->where('client_name', 'like', '%' . $request->input('search') . '%');
+            $query->where('client_name', 'like', '%'.$request->input('search').'%');
         }
 
         // Cerradas automáticamente y aún sin revisar (lista "Por revisar").
@@ -126,7 +131,7 @@ class RutaController extends Controller
             'driver_id' => 'nullable|integer|exists:users,id',
         ]);
 
-        if (empty($validated['estimated_price']) && !empty($validated['estimated_distance_km']) && !empty($validated['price_per_km'])) {
+        if (empty($validated['estimated_price']) && ! empty($validated['estimated_distance_km']) && ! empty($validated['price_per_km'])) {
             $validated['estimated_price'] = round((float) $validated['estimated_distance_km'] * (float) $validated['price_per_km'], 2);
         }
 
@@ -156,10 +161,11 @@ class RutaController extends Controller
                 $tripDate = isset($validated['trip_date'])
                     ? substr((string) $validated['trip_date'], 0, 10)
                     : now()->toDateString();
-                $isDriverForOwner = \App\Models\OwnerMonthCode::where('owner_id', $requestedOwnerId)
-                    ->whereHas('driverEntries', fn ($q) => $q->where('driver_id', $user->id))
-                    ->get()
-                    ->contains(fn ($code) => $code->authorizesDate($tripDate));
+                $isDriverForOwner = OwnerDriver::isActive($requestedOwnerId, $user->id)
+                    || OwnerMonthCode::where('owner_id', $requestedOwnerId)
+                        ->whereHas('driverEntries', fn ($q) => $q->where('driver_id', $user->id))
+                        ->get()
+                        ->contains(fn ($code) => $code->authorizesDate($tripDate));
 
                 if (! $isDriverForOwner) {
                     return response()->json(['message' => 'No estás unido al código de este propietario para esta fecha'], 403);
@@ -174,6 +180,17 @@ class RutaController extends Controller
                     return response()->json(['message' => 'Necesitas al menos un vehículo para crear rutas'], 403);
                 }
                 $validated['owner_id'] = $user->id;
+                // Si no se indica conductor, se usa el predeterminado del equipo.
+                if (! $request->has('driver_id')) {
+                    $requestedDriverId = OwnerDriver::defaultDriverId($user->id);
+                }
+                // Asignar el viaje a un conductor de su equipo (null = lo hace él).
+                if ($requestedDriverId && $requestedDriverId !== $user->id) {
+                    if (! OwnerDriver::isActive($user->id, $requestedDriverId)) {
+                        return response()->json(['message' => 'Ese conductor no forma parte de tu equipo'], 422);
+                    }
+                    $validated['driver_id'] = $requestedDriverId;
+                }
             }
         }
 
@@ -185,8 +202,8 @@ class RutaController extends Controller
         }
 
         // If vehicle_id provided, ensure it belongs to the resolved owner's fleet.
-        if (!empty($validated['vehicle_id'])) {
-            $vehicle = \App\Models\Vehicle::find($validated['vehicle_id']);
+        if (! empty($validated['vehicle_id'])) {
+            $vehicle = Vehicle::find($validated['vehicle_id']);
             if (! $vehicle) {
                 return response()->json(['message' => 'Vehicle not found'], 422);
             }
@@ -197,7 +214,7 @@ class RutaController extends Controller
 
         // Enforce the free-plan ruta limit on the resolved owner (admins bypass it).
         if (isset($validated['owner_id']) && (! $user || ! $user->isAdmin())) {
-            $ownerUser = \App\Models\User::find($validated['owner_id']);
+            $ownerUser = User::find($validated['owner_id']);
             if ($ownerUser && ! $ownerUser->isPremium()) {
                 $limit = config('rutero.free_owner_ruta_limit');
                 $rutaCount = Ruta::where('owner_id', $ownerUser->id)->count();
@@ -223,7 +240,7 @@ class RutaController extends Controller
     public function show(Request $request, Ruta $ruta): JsonResponse
     {
         $user = $request->user();
-        if ($user && ! $user->isAdmin() && $ruta->owner_id !== $user->id && $ruta->driver_id !== $user->id) {
+        if ($user && ! $user->isAdmin() && $ruta->owner_id !== $user->id && ! $this->driverCanAccess($ruta, $user)) {
             return response()->json([], 403);
         }
 
@@ -258,24 +275,38 @@ class RutaController extends Controller
             'trip_time' => 'sometimes|required|date_format:H:i',
             'status' => 'sometimes|in:pending,completed',
             'notes' => 'sometimes|nullable|string|max:2000',
+            'driver_id' => 'sometimes|nullable|integer',
         ]);
 
-        if (empty($validated['estimated_price']) && !empty($ruta->estimated_distance_km) && !empty($ruta->price_per_km)) {
+        if (empty($validated['estimated_price']) && ! empty($ruta->estimated_distance_km) && ! empty($ruta->price_per_km)) {
             $validated['estimated_price'] = round((float) $ruta->estimated_distance_km * (float) $ruta->price_per_km, 2);
         }
 
         $user = $request->user();
 
         $isOwner = $user && ($user->isAdmin() || $ruta->owner_id === $user->id);
-        if (! $isOwner && (! $user || $ruta->driver_id !== $user->id)) {
+        if (! $isOwner && (! $user || ! $this->driverCanAccess($ruta, $user))) {
             return response()->json([], 403);
+        }
+
+        // Reasignar conductor: solo el propietario y solo a alguien de su equipo.
+        if ($isOwner && array_key_exists('driver_id', $validated)) {
+            $newDriver = $validated['driver_id'] ?: null;
+            if ($newDriver === $ruta->owner_id) {
+                $newDriver = null;
+            }
+            if ($newDriver && $newDriver !== $ruta->driver_id && ! $user->isAdmin()
+                && ! OwnerDriver::isActive($ruta->owner_id, $newDriver)) {
+                return response()->json(['message' => 'Ese conductor no forma parte de tu equipo'], 422);
+            }
+            $validated['driver_id'] = $newDriver;
         }
 
         // Whoever isn't the owner (typically the assigned driver) can only update a limited set of fields.
         if (! $isOwner) {
             $allowed = ['final_price', 'payment_method', 'status', 'notes'];
             $validated = array_intersect_key($validated, array_flip($allowed));
-            if (isset($validated['status']) && !in_array($validated['status'], ['completed', 'pending'])) {
+            if (isset($validated['status']) && ! in_array($validated['status'], ['completed', 'pending'])) {
                 unset($validated['status']);
             }
         }
@@ -284,6 +315,11 @@ class RutaController extends Controller
         // registra en ruta_completions sin borrar las marcas de los demás.
         // completed_by queda como el último que lo marcó (compatibilidad).
         $markingCompleted = $user && ($validated['status'] ?? null) === 'completed';
+        // Un conductor del equipo que completa un viaje sin asignar pasa a ser
+        // su conductor. Si lo marca el propietario, el conductor no se toca.
+        if ($markingCompleted && ! $isOwner && $ruta->driver_id === null) {
+            $validated['driver_id'] = $user->id;
+        }
         if ($markingCompleted) {
             $validated['completed_by'] = $user->id;
             // Same default as auto-complete / right-swipe: cash when completing with no payment set.
@@ -331,13 +367,26 @@ class RutaController extends Controller
     public function review(Request $request, Ruta $ruta): JsonResponse
     {
         $user = $request->user();
-        $allowed = $user->isAdmin() || $ruta->owner_id === $user->id || $ruta->driver_id === $user->id;
+        $allowed = $user->isAdmin() || $ruta->owner_id === $user->id || $this->driverCanAccess($ruta, $user);
         if (! $allowed) {
             return response()->json([], 403);
         }
 
+        $changes = [];
         if ($ruta->auto_completed && ! $ruta->reviewed_at) {
-            $ruta->update(['reviewed_at' => now()]);
+            $changes['reviewed_at'] = now();
+        }
+        // Confirmar ("Correcto") un viaje sin asignar lo deja a nombre del
+        // conductor que lo confirma; si confirma el propietario, no se toca.
+        $isOwner = $user->isAdmin() || $ruta->owner_id === $user->id;
+        if (! $isOwner && $ruta->driver_id === null) {
+            $changes['driver_id'] = $user->id;
+        }
+        if ($changes) {
+            $ruta->update($changes);
+            if (isset($changes['driver_id']) && $ruta->status === 'completed') {
+                $ruta->recordCompletion($user->id);
+            }
         }
 
         return response()->json($ruta);
@@ -348,6 +397,67 @@ class RutaController extends Controller
      * cron cerrará la ruta si el siguiente viaje no lo adelanta. La app la usa
      * para avisar al usuario de que el viaje se completará solo.
      */
+    /**
+     * Viajes que ve un conductor en cuentas ajenas:
+     *  a) los que tiene asignados (driver_id) si los creó él (código de
+     *     jornada), si tiene vínculo activo con el propietario o si son de
+     *     días anteriores (al dejar el equipo conserva su historial);
+     *  b) los SIN asignar de los propietarios de su equipo, desde el día en
+     *     que se unió: son la jornada compartida. Al completarlos o
+     *     confirmarlos pasan a su nombre (ver update y review).
+     */
+    private function scopeDriverAccess($q, User $user)
+    {
+        $today = now(config('rutero.auto_complete.timezone'))->toDateString();
+
+        return $q->where(function ($q) use ($user, $today) {
+            $q->where(function ($q) use ($user, $today) {
+                $q->where('driver_id', $user->id)
+                    ->where(function ($q) use ($user, $today) {
+                        $q->where('created_by', $user->id)
+                            ->orWhereIn('owner_id', $user->activeOwnerIds())
+                            ->orWhereDate('trip_date', '<', $today);
+                    });
+            })->orWhere(function ($q) use ($user) {
+                $q->whereNull('driver_id')
+                    ->whereExists(function ($sub) use ($user) {
+                        $sub->selectRaw('1')
+                            ->from('owner_drivers')
+                            ->whereColumn('owner_drivers.owner_id', 'rutas.owner_id')
+                            ->where('owner_drivers.driver_id', $user->id)
+                            ->where('owner_drivers.status', OwnerDriver::STATUS_ACTIVE)
+                            ->whereRaw('DATE(owner_drivers.accepted_at) <= rutas.trip_date');
+                    });
+            });
+        });
+    }
+
+    private function driverCanAccess(Ruta $ruta, User $user): bool
+    {
+        if ($ruta->driver_id === null) {
+            return $this->isUnassignedForTeamDriver($ruta, $user);
+        }
+        if ($ruta->driver_id !== $user->id) {
+            return false;
+        }
+        $today = now(config('rutero.auto_complete.timezone'))->toDateString();
+
+        return $ruta->created_by === $user->id
+            || OwnerDriver::isActive($ruta->owner_id, $user->id)
+            || ($ruta->trip_date && $ruta->trip_date->toDateString() < $today);
+    }
+
+    /** Viaje sin asignar de un propietario de su equipo, desde que se unió. */
+    private function isUnassignedForTeamDriver(Ruta $ruta, User $user): bool
+    {
+        if ($ruta->driver_id !== null || ! $ruta->trip_date) {
+            return false;
+        }
+        $link = OwnerDriver::active()->where('owner_id', $ruta->owner_id)->where('driver_id', $user->id)->first();
+
+        return $link && $link->accepted_at && $link->accepted_at->toDateString() <= $ruta->trip_date->toDateString();
+    }
+
     private function attachAutoCompleteEta($rutas): void
     {
         $completer = app(RutaAutoCompleter::class);

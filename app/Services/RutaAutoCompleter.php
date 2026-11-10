@@ -148,6 +148,12 @@ class RutaAutoCompleter
         $ruta->auto_completed_at = now();
         $ruta->reviewed_at = null;
         $ruta->save();
+
+        // Se atribuye al conductor asignado. Sin conductor, el viaje queda a
+        // nombre del propietario y la lista "Por revisar" permite asignarlo.
+        if ($ruta->driver_id) {
+            $ruta->recordCompletion($ruta->driver_id, 'auto');
+        }
     }
 
     /** Recorre las rutas pendientes y cierra las que corresponda. Devuelve cuántas cerró. */

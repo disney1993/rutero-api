@@ -57,6 +57,22 @@ class OwnerMonthCode extends Model
     }
 
     /** ¿El código autoriza unirse / operar en la fecha dada (Y-m-d)? */
+    /**
+     * ¿Se puede todavía usar el código para unirse? Un código de día sirve
+     * hasta ese día incluido (se puede compartir la víspera) y uno de mes,
+     * hasta que acaba ese mes. Se evalúa en la hora de España.
+     */
+    public function isJoinable(): bool
+    {
+        $today = now(config('rutero.auto_complete.timezone'));
+
+        if ($this->isDay()) {
+            return $this->valid_on && $this->valid_on->toDateString() >= $today->toDateString();
+        }
+
+        return (string) $this->month >= $today->format('Y-m');
+    }
+
     public function authorizesDate(?string $date = null): bool
     {
         $date = substr($date ?: now()->toDateString(), 0, 10);

@@ -18,6 +18,14 @@ return [
         'default_duration_min' => 60,
     ],
 
+    // Enlaces de invitación (/i/{código}): abren la app instalada o, si no lo
+    // está, ofrecen descargarla. download_url = APK de EAS o ficha de la tienda.
+    'app_links' => [
+        'scheme' => env('RUTERO_APP_SCHEME', 'rutero'),
+        'android_package' => env('RUTERO_ANDROID_PACKAGE', 'com.rutero.app'),
+        'download_url' => env('RUTERO_DOWNLOAD_URL'),
+    ],
+
     // Contraseñas de las cuentas de demo que crea DatabaseSeeder. En producción
     // son obligatorias (mín. 12 caracteres): el seeder se niega a correr sin
     // ellas para no dejar cuentas con contraseñas conocidas del repositorio.

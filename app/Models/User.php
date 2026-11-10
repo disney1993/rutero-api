@@ -107,9 +107,27 @@ class User extends Authenticatable
         return $this->vehicles()->exists() || $this->ownerMonthCodes()->exists();
     }
 
+    /** Vínculos en los que este usuario es el propietario (su equipo). */
+    public function teamLinks()
+    {
+        return $this->hasMany(OwnerDriver::class, 'owner_id');
+    }
+
+    /** Vínculos en los que este usuario conduce para otro propietario. */
+    public function driverLinks()
+    {
+        return $this->hasMany(OwnerDriver::class, 'driver_id');
+    }
+
+    /** Ids de los propietarios para los que conduce con vínculo activo. */
+    public function activeOwnerIds(): array
+    {
+        return $this->driverLinks()->active()->pluck('owner_id')->all();
+    }
+
     public function hasDriverCapability(): bool
     {
-        return $this->driverCodeEntries()->exists();
+        return $this->driverLinks()->active()->exists() || $this->driverCodeEntries()->exists();
     }
 
     public function isAdmin(): bool

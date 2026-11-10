@@ -79,11 +79,12 @@ class Ruta extends Model
     }
 
     /** Registra (sin borrar a los demás) que este usuario completó la ruta. */
-    public function recordCompletion(int $userId): void
+    /** @param string $source manual (lo marcó una persona) | auto (cierre automático) */
+    public function recordCompletion(int $userId, string $source = 'manual'): void
     {
         $this->completions()->firstOrCreate(
             ['user_id' => $userId],
-            ['completed_at' => now()]
+            ['completed_at' => now(), 'source' => $source]
         );
 
         if ($this->completed_by !== $userId) {

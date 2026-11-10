@@ -156,13 +156,14 @@ class OwnerCodeTest extends TestCase
             'seats' => 5, 'plate' => 'DAY-001', 'vehicle_type' => 'sedan',
         ])->assertStatus(201);
 
-        $today = date('Y-m-d');
+        // Las fechas de jornada son de España (rutero.auto_complete.timezone).
+        $today = now('Europe/Madrid')->toDateString();
         $create = $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])
             ->postJson('/api/owner/codes', ['type' => 'day', 'valid_on' => $today]);
         $create->assertStatus(201)
             ->assertJsonPath('type', 'day')
             ->assertJsonPath('valid_on', $today)
-            ->assertJsonPath('month', date('Y-m'));
+            ->assertJsonPath('month', substr($today, 0, 7));
         $code = $create->json('code');
 
         $dreg = $this->postJson('/api/register', [
