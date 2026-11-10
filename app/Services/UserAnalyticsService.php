@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Expense;
 use App\Models\Ruta;
 use App\Models\User;
 use Carbon\CarbonImmutable;
@@ -38,7 +39,7 @@ class UserAnalyticsService
     /**
      * Lifetime summary fields used by GET /reports/user-summary.
      *
-     * @return array{rutas_total: int, rutas_by_status: \Illuminate\Support\Collection, revenue_completed: float}
+     * @return array{rutas_total: int, rutas_by_status: Collection, revenue_completed: float}
      */
     public function lifetimeSummary(int $userId, string $role = 'all'): array
     {
@@ -68,6 +69,7 @@ class UserAnalyticsService
         $previous = $this->countersForRange($userId, $prevFrom, $prevTo, $role);
 
         $counters['delta_revenue'] = $this->money($counters['revenue'] - $previous['revenue']);
+        $counters['delta_net'] = $this->money($counters['net'] - $previous['net']);
         $counters['delta_trips'] = $counters['trips_total'] - $previous['trips_total'];
 
         return [
@@ -93,14 +95,19 @@ class UserAnalyticsService
             '%Y-%m-%d',
             $role
         );
+        $spent = $role === 'driver' ? [] : $this->expensesByDateKey($userId, $start, $start->endOfMonth(), '%Y-%m-%d');
 
         $series = [];
         for ($day = 1; $day <= $daysInMonth; $day++) {
             $date = $start->setDay($day)->format('Y-m-d');
+            $revenue = $this->money($totals[$date] ?? 0);
+            $expenses = $this->money($spent[$date] ?? 0);
             $series[] = [
                 'label' => sprintf('%02d', $day),
                 'date' => $date,
-                'revenue' => $this->money($totals[$date] ?? 0),
+                'revenue' => $revenue,
+                'expenses' => $expenses,
+                'net' => $this->money($revenue - $expenses),
             ];
         }
 
@@ -123,14 +130,20 @@ class UserAnalyticsService
             $role
         );
 
+        $spent = $role === 'driver' ? [] : $this->expensesByDateKey($userId, $start, $start->endOfYear(), '%Y-%m');
+
         $series = [];
         for ($month = 1; $month <= 12; $month++) {
             $key = sprintf('%04d-%02d', $year, $month);
+            $revenue = $this->money($totals[$key] ?? 0);
+            $expenses = $this->money($spent[$key] ?? 0);
             $series[] = [
                 'label' => sprintf('%02d', $month),
                 'year' => $year,
                 'month' => $month,
-                'revenue' => $this->money($totals[$key] ?? 0),
+                'revenue' => $revenue,
+                'expenses' => $expenses,
+                'net' => $this->money($revenue - $expenses),
             ];
         }
 
@@ -185,6 +198,7 @@ class UserAnalyticsService
                 'daily' => $this->dailyRevenueSeries($target->id, $anchorDate->year, $anchorDate->month, $role),
                 'monthly' => $this->monthlyRevenueSeries($target->id, $anchorDate->year, $role),
             ],
+            'expenses_by_category' => $role === 'driver' ? [] : $this->expensesByCategory($target->id, $period, $anchorDate),
             'vehicles_total' => $role === 'driver' ? 0 : $target->vehicles()->count(),
             'has_owner_capability' => $target->hasOwnerCapability(),
             'has_driver_capability' => $target->hasDriverCapability(),
@@ -252,6 +266,14 @@ class UserAnalyticsService
             ? $this->money(($tripsCompleted / $tripsTotal) * 100)
             : 0.0;
 
+        // Gastos y beneficio: solo en la vista de propietario (los gastos son suyos).
+        $expenses = $role === 'driver' ? 0.0 : $this->money(
+            Expense::where('owner_id', $userId)
+                ->whereDate('date', '>=', $from->toDateString())
+                ->whereDate('date', '<=', $to->toDateString())
+                ->sum('amount')
+        );
+
         return [
             'trips_total' => $tripsTotal,
             'trips_completed' => $tripsCompleted,
@@ -260,6 +282,8 @@ class UserAnalyticsService
             'revenue' => $revenue,
             'avg_ticket' => $avgTicket,
             'completion_rate' => $completionRate,
+            'expenses' => $expenses,
+            'net' => $this->money($revenue - $expenses),
         ];
     }
 
@@ -292,23 +316,68 @@ class UserAnalyticsService
         return $mapped;
     }
 
-    private function bucketExpression(string $strftimeFormat): string
+    private function bucketExpression(string $strftimeFormat, string $column = 'trip_date'): string
     {
+        // $column siempre viene de este servicio (trip_date o date), nunca del usuario.
         $driver = Ruta::query()->getConnection()->getDriverName();
 
         if ($driver === 'sqlite') {
             return match ($strftimeFormat) {
-                '%Y-%m-%d' => "strftime('%Y-%m-%d', trip_date)",
-                '%Y-%m' => "strftime('%Y-%m', trip_date)",
+                '%Y-%m-%d' => "strftime('%Y-%m-%d', {$column})",
+                '%Y-%m' => "strftime('%Y-%m', {$column})",
                 default => throw new \InvalidArgumentException('Unsupported date format'),
             };
         }
 
         return match ($strftimeFormat) {
-            '%Y-%m-%d' => "DATE_FORMAT(trip_date, '%Y-%m-%d')",
-            '%Y-%m' => "DATE_FORMAT(trip_date, '%Y-%m')",
+            '%Y-%m-%d' => "DATE_FORMAT({$column}, '%Y-%m-%d')",
+            '%Y-%m' => "DATE_FORMAT({$column}, '%Y-%m')",
             default => throw new \InvalidArgumentException('Unsupported date format'),
         };
+    }
+
+    /** @return array<string, float> gastos del propietario agrupados por día o por mes */
+    private function expensesByDateKey(int $ownerId, CarbonImmutable $from, CarbonImmutable $to, string $format): array
+    {
+        $expression = $this->bucketExpression($format, 'date');
+
+        return Expense::where('owner_id', $ownerId)
+            ->whereDate('date', '>=', $from->toDateString())
+            ->whereDate('date', '<=', $to->toDateString())
+            ->selectRaw("{$expression} as bucket, COALESCE(SUM(amount), 0) as total")
+            ->groupByRaw($expression)
+            ->pluck('total', 'bucket')
+            ->map(fn ($v) => $this->money($v))
+            ->all();
+    }
+
+    /** @return list<array{category: string, total: float}> gastos del periodo por categoría */
+    public function expensesByCategory(int $ownerId, string $period, CarbonImmutable $anchorDate): array
+    {
+        [$from, $to] = $this->periodBounds($period, $anchorDate);
+
+        return Expense::where('owner_id', $ownerId)
+            ->whereDate('date', '>=', $from->toDateString())
+            ->whereDate('date', '<=', $to->toDateString())
+            ->selectRaw('category, SUM(amount) as total')
+            ->groupBy('category')
+            ->orderByDesc('total')
+            ->get()
+            ->map(fn ($r) => ['category' => $r->category, 'total' => $this->money($r->total)])
+            ->all();
+    }
+
+    /** @return Collection<int, Expense> gastos del periodo para la exportación */
+    public function expenseRowsForPeriod(int $ownerId, string $period, CarbonImmutable $anchorDate): Collection
+    {
+        [$from, $to] = $this->periodBounds($period, $anchorDate);
+
+        return Expense::where('owner_id', $ownerId)
+            ->whereDate('date', '>=', $from->toDateString())
+            ->whereDate('date', '<=', $to->toDateString())
+            ->with(['vehicle:id,plate', 'driver:id,first_name,last_name'])
+            ->orderBy('date')
+            ->get();
     }
 
     private function money(mixed $value): float

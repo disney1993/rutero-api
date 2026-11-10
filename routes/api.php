@@ -75,6 +75,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/jornadas/{jornada}', [\App\Http\Controllers\JornadaController::class, 'destroy']);
     Route::post('/jornadas/{jornada}/code', [\App\Http\Controllers\JornadaController::class, 'regenerateCode']);
 
+    // Gastos del propietario (pantalla Gastos e informes de beneficio)
+    Route::get('/reference/expense-categories', [\App\Http\Controllers\ExpenseController::class, 'categories']);
+    Route::get('/expenses', [\App\Http\Controllers\ExpenseController::class, 'index']);
+    Route::post('/expenses', [\App\Http\Controllers\ExpenseController::class, 'store']);
+    Route::patch('/expenses/{expense}', [\App\Http\Controllers\ExpenseController::class, 'update']);
+    Route::delete('/expenses/{expense}', [\App\Http\Controllers\ExpenseController::class, 'destroy']);
+    Route::post('/expenses/{id}/restore', [\App\Http\Controllers\ExpenseController::class, 'restore'])->whereNumber('id');
+
     // Drivers joining codes
     Route::post('/driver/join-code', [\App\Http\Controllers\DriverCodeController::class, 'join'])->middleware('throttle:10,1');
     Route::get('/driver/my-codes', [\App\Http\Controllers\DriverCodeController::class, 'listMyCodes']);

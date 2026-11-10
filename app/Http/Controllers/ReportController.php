@@ -81,6 +81,10 @@ class ReportController extends Controller
         $trips = $this->analytics->tripRowsForPeriod($target->id, $period, $anchor, $role);
         [$from, $to] = $this->analytics->periodBounds($period, $anchor);
 
+        // Gastos (solo en el informe de propietario).
+        $withExpenses = $role !== 'driver';
+        $categories = config('expense_categories');
+
         $payload = [
             'user' => $target,
             'period' => $period,
@@ -89,6 +93,9 @@ class ReportController extends Controller
             'to' => $to->toDateString(),
             'counters' => $periodData['counters'],
             'trips' => $trips,
+            'withExpenses' => $withExpenses,
+            'expenses' => $withExpenses ? $this->analytics->expenseRowsForPeriod($target->id, $period, $anchor) : collect(),
+            'categoryLabels' => collect($categories)->map(fn ($c) => $c['es'])->all(),
         ];
 
         $basename = 'reporte-viajes-'.$anchor->format('Y-m-d');
@@ -146,7 +153,7 @@ class ReportController extends Controller
 
     private function streamXlsx(array $payload, string $filename): StreamedResponse
     {
-        $spreadsheet = new Spreadsheet();
+        $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Reporte');
 
@@ -205,6 +212,37 @@ class ReportController extends Controller
 
         $sheet->setCellValue("A{$row}", 'Total ingresos');
         $sheet->setCellValue("G{$row}", $counters['revenue']);
+
+        if ($payload['withExpenses']) {
+            $row += 2;
+            $sheet->setCellValue("A{$row}", 'Total gastos');
+            $sheet->setCellValue("G{$row}", $counters['expenses']);
+            $row++;
+            $sheet->setCellValue("A{$row}", 'Beneficio (ingresos - gastos)');
+            $sheet->setCellValue("G{$row}", $counters['net']);
+
+            // Hoja aparte con el detalle de los gastos del periodo.
+            $expensesSheet = $spreadsheet->createSheet();
+            $expensesSheet->setTitle('Gastos');
+            foreach (['Fecha', 'Categoría', 'Descripción', 'Vehículo', 'Conductor', 'Pago', 'IVA', 'Importe'] as $col => $header) {
+                $expensesSheet->setCellValue([$col + 1, 1], $header);
+            }
+            $r = 2;
+            foreach ($payload['expenses'] as $expense) {
+                $expensesSheet->setCellValue("A{$r}", $expense->date?->format('Y-m-d'));
+                $expensesSheet->setCellValue("B{$r}", $payload['categoryLabels'][$expense->category] ?? $expense->category);
+                $expensesSheet->setCellValue("C{$r}", $expense->description);
+                $expensesSheet->setCellValue("D{$r}", $expense->vehicle?->plate);
+                $expensesSheet->setCellValue("E{$r}", $expense->driver ? trim($expense->driver->first_name.' '.$expense->driver->last_name) : null);
+                $expensesSheet->setCellValue("F{$r}", $expense->payment_method);
+                $expensesSheet->setCellValue("G{$r}", $expense->vat_amount !== null ? (float) $expense->vat_amount : null);
+                $expensesSheet->setCellValue("H{$r}", (float) $expense->amount);
+                $r++;
+            }
+            $expensesSheet->setCellValue("A{$r}", 'Total gastos');
+            $expensesSheet->setCellValue("H{$r}", $counters['expenses']);
+            $spreadsheet->setActiveSheetIndex(0);
+        }
 
         return response()->streamDownload(function () use ($spreadsheet) {
             $writer = new Xlsx($spreadsheet);

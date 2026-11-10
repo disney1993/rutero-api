@@ -35,6 +35,10 @@
         <tr><td>Ingresos</td><td class="right">{{ number_format($counters['revenue'], 2, ',', '.') }}</td></tr>
         <tr><td>Ticket medio</td><td class="right">{{ number_format($counters['avg_ticket'], 2, ',', '.') }}</td></tr>
         <tr><td>% completados</td><td class="right">{{ number_format($counters['completion_rate'], 2, ',', '.') }}%</td></tr>
+        @if ($withExpenses ?? false)
+            <tr><td>Gastos</td><td class="right">{{ number_format($counters['expenses'], 2, ',', '.') }}</td></tr>
+            <tr><td><strong>Beneficio (ingresos - gastos)</strong></td><td class="right"><strong>{{ number_format($counters['net'], 2, ',', '.') }}</strong></td></tr>
+        @endif
     </table>
 
     <h2>Viajes del periodo</h2>
@@ -74,5 +78,38 @@
     </table>
 
     <p class="totals">Total ingresos: {{ number_format($counters['revenue'], 2, ',', '.') }}</p>
+
+    @if ($withExpenses ?? false)
+        <h2>Gastos del periodo</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Categoría</th>
+                    <th>Descripción</th>
+                    <th>Vehículo / conductor</th>
+                    <th>Importe</th>
+                </tr>
+            </thead>
+            <tbody>
+                @forelse ($expenses as $expense)
+                    <tr>
+                        <td>{{ $expense->date?->format('Y-m-d') }}</td>
+                        <td>{{ $categoryLabels[$expense->category] ?? $expense->category }}</td>
+                        <td>{{ $expense->description }}</td>
+                        <td>{{ collect([$expense->vehicle?->plate, $expense->driver ? trim($expense->driver->first_name.' '.$expense->driver->last_name) : null])->filter()->join(' · ') }}</td>
+                        <td class="right">{{ number_format((float) $expense->amount, 2, ',', '.') }}</td>
+                    </tr>
+                @empty
+                    <tr>
+                        <td colspan="5">Sin gastos en este periodo.</td>
+                    </tr>
+                @endforelse
+            </tbody>
+        </table>
+        <p class="totals">Total gastos: {{ number_format($counters['expenses'], 2, ',', '.') }}</p>
+        <p class="totals">Beneficio: {{ number_format($counters['net'], 2, ',', '.') }}</p>
+        <p style="font-size: 10px; color: #666;">Resumen de gestión: no sustituye a la contabilidad fiscal (por ejemplo, las multas no son gasto deducible).</p>
+    @endif
 </body>
 </html>
