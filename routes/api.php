@@ -83,6 +83,16 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('/expenses/{expense}', [\App\Http\Controllers\ExpenseController::class, 'destroy']);
     Route::post('/expenses/{id}/restore', [\App\Http\Controllers\ExpenseController::class, 'restore'])->whereNumber('id');
 
+    // Facturación: datos fiscales del emisor, facturas de los viajes y destinatarios
+    Route::get('/billing-profile', [\App\Http\Controllers\BillingProfileController::class, 'show']);
+    Route::put('/billing-profile', [\App\Http\Controllers\BillingProfileController::class, 'update']);
+    Route::get('/rutas/{ruta}/invoice', [\App\Http\Controllers\InvoiceController::class, 'forRuta'])->withTrashed();
+    Route::post('/rutas/{ruta}/invoice', [\App\Http\Controllers\InvoiceController::class, 'store'])->middleware('throttle:30,1');
+    Route::get('/invoices', [\App\Http\Controllers\InvoiceController::class, 'index']);
+    Route::get('/invoices/{invoice}/pdf', [\App\Http\Controllers\InvoiceController::class, 'pdf']);
+    Route::post('/invoices/{invoice}/corrective', [\App\Http\Controllers\InvoiceController::class, 'corrective']);
+    Route::get('/invoice-clients', [\App\Http\Controllers\InvoiceController::class, 'clients']);
+
     // Drivers joining codes
     Route::post('/driver/join-code', [\App\Http\Controllers\DriverCodeController::class, 'join'])->middleware('throttle:10,1');
     Route::get('/driver/my-codes', [\App\Http\Controllers\DriverCodeController::class, 'listMyCodes']);
