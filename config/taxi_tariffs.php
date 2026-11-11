@@ -1,5 +1,12 @@
 <?php
 
+// TODO(rutero): completar y revisar las tarifas cada año.
+//   Faltan, sin dato verificado: Illes Balears, Canarias, Cantabria,
+//   Castilla-La Mancha, Extremadura, Navarra, País Vasco, Ceuta y Melilla
+//   (en algunas la competencia es de cabildos, consejos insulares o
+//   diputaciones forales). Las comunidades suelen publicar las nuevas
+//   tarifas entre diciembre y marzo: revisar los boletines oficiales.
+
 /*
 | Tarifas interurbanas máximas de taxi por comunidad autónoma (referencia).
 |

@@ -8,6 +8,15 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
+/*
+ * TODO(rutero): retirar los códigos de mes y de día (legado).
+ *   Desde las jornadas (JornadaController) la app ya no genera estos códigos:
+ *   cada jornada tiene el suyo y las invitaciones al equipo van por
+ *   TeamController. Se mantienen para que sigan funcionando los ya
+ *   compartidos. Cuando no quede ninguno vigente: dejar de aceptar nuevos
+ *   (store), migrar los driver_code_entries que falten a owner_drivers y
+ *   eliminar owner_month_codes, driver_code_entries y este controlador.
+ */
 class OwnerCodeController extends Controller
 {
     public function index(Request $request)

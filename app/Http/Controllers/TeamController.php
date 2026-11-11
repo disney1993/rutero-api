@@ -100,6 +100,14 @@ class TeamController extends Controller
             ]);
         }
 
+        // TODO(rutero): enviar el correo de invitación desde el servidor.
+        //   Hoy la invitación por email solo se ve dentro de la app al entrar
+        //   con ese email; la app abre además el cliente de correo del móvil
+        //   (mailto:) para que el propietario la envíe él. Para enviarla
+        //   desde aquí: configurar MAIL_* en Laravel Cloud, crear un
+        //   Mailable con el enlace /i/{código} y encolarlo, sin cambiar la
+        //   respuesta (debe seguir sin revelar si la cuenta existe) y con
+        //   límite de envíos por propietario y día para evitar abusos.
         // Misma respuesta en todos los casos: no revela si el email tiene cuenta.
         return response()->json([
             'message' => 'Invitación registrada. La persona la verá en Rutero al iniciar sesión con ese email.',

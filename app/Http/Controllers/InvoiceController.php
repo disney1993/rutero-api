@@ -15,6 +15,30 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
+/*
+ * TODO(rutero): VeriFactu (obligatorio para autónomos desde el 1/7/2027).
+ *   Por qué: al emitir facturas, Rutero es un "sistema informático de
+ *   facturación" (RD 1007/2023 y Orden HAC/1177/2024; plazos según el
+ *   RDL 15/2025). Ya cumple la base: numeración sin huecos, facturas
+ *   inalterables y huella encadenada (Invoice::computeHash).
+ *   Qué falta:
+ *    1. Generar el registro de facturación con el formato XML de la AEAT y
+ *       la huella según su especificación (SHA-256 sobre campos concretos,
+ *       no el formato propio actual), y el registro de anulación.
+ *    2. Enviarlo a la AEAT (servicio web con certificado) o elegir la
+ *       modalidad "no VERI*FACTU" con firma y registro de eventos.
+ *    3. Imprimir el QR de cotejo y la leyenda "VERI*FACTU" en el PDF
+ *       (resources/views/invoices/invoice.blade.php). No mostrar la leyenda
+ *       hasta cumplir de verdad.
+ *    4. Declaración responsable del productor del software.
+ *   Alternativa: delegar en un proveedor homologado mediante su API.
+ *   Antes de producción: validarlo con un asesor fiscal.
+ *
+ * TODO(rutero): territorios forales y clientes extranjeros.
+ *   País Vasco (TicketBAI) y Navarra tienen sistemas propios: hoy no se
+ *   contemplan. Tampoco los NIF-IVA intracomunitarios de clientes de otros
+ *   países de la UE (SpanishTaxId solo valida identificadores españoles).
+ */
 /**
  * Facturas de los viajes (RD 1619/2012):
  * - Simplificada (art. 7) por defecto hasta el límite del art. 4 (3.000 € en

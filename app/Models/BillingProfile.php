@@ -5,6 +5,15 @@ namespace App\Models;
 use App\Support\SpanishTaxId;
 use Illuminate\Database\Eloquent\Model;
 
+/*
+ * TODO(rutero): ampliar el perfil de facturación.
+ *  - Logotipo (ver invoice.blade.php).
+ *  - Retención de IRPF si algún día se facturan servicios profesionales
+ *    (el transporte es actividad empresarial y hoy no lleva retención).
+ *  - Recargo de equivalencia y regímenes especiales: no contemplados.
+ *  - Serie por año automática: hoy el propietario cambia la serie a mano
+ *    al empezar el año (BillingProfileController reinicia el número a 1).
+ */
 /**
  * Datos fiscales del emisor de las facturas (el propietario). Se guardan una
  * vez y se copian en cada factura al emitirla.

@@ -15,6 +15,19 @@ use Illuminate\Support\Facades\Log;
 // garantía de disponibilidad para tráfico alto.
 // TODO: si se configura GOOGLE_MAPS_API_KEY, usar Distance Matrix / Routes
 // como primario o fallback, y deep-link de navegación en la app.
+/*
+ * TODO(rutero): sustituir Nominatim por Photon en el autocompletado.
+ *   La política de uso de Nominatim prohíbe el autocompletado mientras se
+ *   escribe (máx. 1 petición/s, sin "search-as-you-type"). Photon (Komoot)
+ *   está pensado para ello y usa los mismos datos de OpenStreetMap:
+ *   https://photon.komoot.io/api/?q=...&lang=es&bbox=<España>. En
+ *   producción, autoalojarlo (Docker) o usar openrouteservice. Mantener la
+ *   caché y el formato de respuesta actual para no tocar la app.
+ * TODO(rutero): OSRM de demostración no es apto para producción.
+ *   router.project-osrm.org es un servicio de pruebas (1 petición/s, sin
+ *   garantías). Autoalojar OSRM con el extracto de España o usar
+ *   openrouteservice. Ver el apartado 2.5 del TFM.
+ */
 class GeocodingController extends Controller
 {
     private const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';

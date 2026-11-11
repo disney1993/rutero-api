@@ -53,6 +53,11 @@ class Invoice extends Model
         return $query->where('type', '!=', 'corrective')->whereDoesntHave('correctedBy');
     }
 
+    // TODO(rutero): huella VeriFactu. Este hash propio sirve para encadenar e
+    // impedir cambios silenciosos, pero no es el de la especificación de la
+    // AEAT (campos, orden y formato distintos). Sustituirlo al implementar
+    // VeriFactu (ver el TODO de InvoiceController) sin romper la cadena: las
+    // facturas ya emitidas conservan su huella y la nueva parte de la última.
     /**
      * Huella encadenada (preparación para VeriFactu): NIF del emisor, número,
      * fecha de expedición, importe total y huella de la factura anterior.

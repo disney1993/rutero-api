@@ -9,6 +9,17 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
 
+/*
+ * TODO(rutero): Android App Links verificados.
+ *   Hoy el enlace https abre esta página, que a su vez intenta abrir la app
+ *   (intent:// en Android, rutero:// en iOS). Con App Links el enlace abriría
+ *   la app directamente: publicar /.well-known/assetlinks.json con el
+ *   paquete com.rutero.app y la huella SHA-256 del certificado de EAS
+ *   (eas credentials), y añadir en app.json android.intentFilters con
+ *   autoVerify para el dominio. En iOS, el equivalente son los Universal
+ *   Links (apple-app-site-association), solo si se publica en iOS.
+ *   Conviene un dominio propio: el de Laravel Cloud puede cambiar.
+ */
 /**
  * Enlaces de invitación: https://<api>/i/{código}.
  *
