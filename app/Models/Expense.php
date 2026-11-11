@@ -6,14 +6,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /*
- * TODO(rutero): mejoras de los gastos.
- *  - Foto del ticket o factura del gasto: subirla a un almacenamiento
- *    persistente (S3 o similar; el disco de Laravel Cloud no lo es) y
- *    guardar aquí su ruta.
- *  - Marcar si el gasto es fiscalmente deducible (las multas no lo son) para
- *    que el informe distinga beneficio de gestión y base fiscal.
- *  - Gastos periódicos (nóminas, seguros, cuota de autónomos) que se creen
- *    solos cada mes.
+ * TODO(rutero): foto del ticket o factura del gasto. Subirla a un
+ *   almacenamiento persistente (S3 o similar; el disco de Laravel Cloud no
+ *   lo es) y guardar aquí su ruta; en la app, ver ExpenseFormModal.
  */
 /** Gasto del negocio de un propietario. */
 class Expense extends Model
@@ -24,6 +19,7 @@ class Expense extends Model
 
     protected $fillable = [
         'owner_id', 'date', 'category', 'description', 'amount', 'vat_amount',
+        'deductible', 'recurring_monthly', 'recurring_parent_id',
         'vehicle_id', 'driver_id', 'payment_method', 'notes',
     ];
 
@@ -31,6 +27,8 @@ class Expense extends Model
         'date' => 'date:Y-m-d',
         'amount' => 'decimal:2',
         'vat_amount' => 'decimal:2',
+        'deductible' => 'boolean',
+        'recurring_monthly' => 'boolean',
     ];
 
     public function vehicle()

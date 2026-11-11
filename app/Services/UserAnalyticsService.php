@@ -274,6 +274,14 @@ class UserAnalyticsService
                 ->sum('amount')
         );
 
+        $deductible = $role === 'driver' ? 0.0 : $this->money(
+            Expense::where('owner_id', $userId)
+                ->where('deductible', true)
+                ->whereDate('date', '>=', $from->toDateString())
+                ->whereDate('date', '<=', $to->toDateString())
+                ->sum('amount')
+        );
+
         return [
             'trips_total' => $tripsTotal,
             'trips_completed' => $tripsCompleted,
@@ -283,6 +291,7 @@ class UserAnalyticsService
             'avg_ticket' => $avgTicket,
             'completion_rate' => $completionRate,
             'expenses' => $expenses,
+            'expenses_deductible' => $deductible,
             'net' => $this->money($revenue - $expenses),
         ];
     }

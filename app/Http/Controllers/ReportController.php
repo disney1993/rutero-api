@@ -218,13 +218,16 @@ class ReportController extends Controller
             $sheet->setCellValue("A{$row}", 'Total gastos');
             $sheet->setCellValue("G{$row}", $counters['expenses']);
             $row++;
+            $sheet->setCellValue("A{$row}", 'Gastos deducibles');
+            $sheet->setCellValue("G{$row}", $counters['expenses_deductible'] ?? 0);
+            $row++;
             $sheet->setCellValue("A{$row}", 'Beneficio (ingresos - gastos)');
             $sheet->setCellValue("G{$row}", $counters['net']);
 
             // Hoja aparte con el detalle de los gastos del periodo.
             $expensesSheet = $spreadsheet->createSheet();
             $expensesSheet->setTitle('Gastos');
-            foreach (['Fecha', 'Categoría', 'Descripción', 'Vehículo', 'Conductor', 'Pago', 'IVA', 'Importe'] as $col => $header) {
+            foreach (['Fecha', 'Categoría', 'Descripción', 'Vehículo', 'Conductor', 'Pago', 'IVA', 'Importe', 'Deducible'] as $col => $header) {
                 $expensesSheet->setCellValue([$col + 1, 1], $header);
             }
             $r = 2;
@@ -237,6 +240,7 @@ class ReportController extends Controller
                 $expensesSheet->setCellValue("F{$r}", $expense->payment_method);
                 $expensesSheet->setCellValue("G{$r}", $expense->vat_amount !== null ? (float) $expense->vat_amount : null);
                 $expensesSheet->setCellValue("H{$r}", (float) $expense->amount);
+                $expensesSheet->setCellValue("I{$r}", $expense->deductible ? 'Sí' : 'No');
                 $r++;
             }
             $expensesSheet->setCellValue("A{$r}", 'Total gastos');

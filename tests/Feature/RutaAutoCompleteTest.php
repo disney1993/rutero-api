@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\OwnerDriver;
 use App\Models\Ruta;
 use App\Models\User;
 use App\Models\Vehicle;
@@ -257,5 +258,29 @@ class RutaAutoCompleteTest extends TestCase
             ->assertJsonPath('auto_complete_enabled', false)
             ->assertJsonPath('auto_complete_start_delay_min', 5)
             ->assertJsonPath('auto_complete_margin_min', 15);
+    }
+
+    public function test_driver_review_assigns_unassigned_trips_to_the_confirming_driver(): void
+    {
+        $driver = User::factory()->create();
+        OwnerDriver::create([
+            'owner_id' => $this->owner->id,
+            'driver_id' => $driver->id,
+            'status' => OwnerDriver::STATUS_ACTIVE,
+            'invited_via' => OwnerDriver::VIA_EMAIL,
+            // Debe ser anterior al trip_date: si no, el viaje sin asignar no es visible.
+            'accepted_at' => '2026-10-01 12:00:00',
+        ]);
+
+        Sanctum::actingAs($this->owner);
+        $ruta = $this->ruta(['driver_id' => null]);
+        $this->run_at('2026-10-06 12:00');
+        $this->assertNull($ruta->fresh()->driver_id);
+
+        Sanctum::actingAs($driver);
+        $this->postJson("/api/rutas/{$ruta->id}/review")
+            ->assertOk()
+            ->assertJsonPath('driver_id', $driver->id)
+            ->assertJsonPath('needs_review', false);
     }
 }

@@ -430,4 +430,40 @@ class TeamTest extends TestCase
         ]);
         $this->as($this->owner)->patchJson("/api/team/{$pending->id}", ['is_default' => true])->assertStatus(422);
     }
+    public function test_invitation_email_is_sent_when_mail_is_configured_without_revealing_accounts(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+        config(['rutero.invitations.send_email' => true]);
+
+        $known = $this->as($this->owner)->postJson('/api/team/invitations', ['type' => 'email', 'email' => 'driver@example.test'])->assertStatus(202);
+        $unknown = $this->as($this->owner)->postJson('/api/team/invitations', ['type' => 'email', 'email' => 'nadie@example.test'])->assertStatus(202);
+
+        $this->assertSame($known->json(), $unknown->json());
+        $this->assertTrue($known->json('email_sent'));
+        \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\TeamInvitationMail::class, 2);
+        \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\TeamInvitationMail::class, fn ($m) => $m->hasTo('nadie@example.test'));
+    }
+
+    public function test_invitation_emails_respect_the_daily_limit_and_skip_active_members(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+        config(['rutero.invitations.send_email' => true, 'rutero.invitations.max_emails_per_day' => 1]);
+
+        $this->as($this->owner)->postJson('/api/team/invitations', ['type' => 'email', 'email' => 'a@example.test'])->assertJsonPath('email_sent', true);
+        $this->as($this->owner)->postJson('/api/team/invitations', ['type' => 'email', 'email' => 'b@example.test'])->assertJsonPath('email_sent', false);
+
+        config(['rutero.invitations.max_emails_per_day' => 10]);
+        $this->link();
+        $this->as($this->owner)->postJson('/api/team/invitations', ['type' => 'email', 'email' => 'driver@example.test'])->assertJsonPath('email_sent', false);
+        \Illuminate\Support\Facades\Mail::assertSent(\App\Mail\TeamInvitationMail::class, 1);
+    }
+
+    public function test_without_mail_service_no_email_is_sent(): void
+    {
+        \Illuminate\Support\Facades\Mail::fake();
+        config(['rutero.invitations.send_email' => false]);
+
+        $this->as($this->owner)->postJson('/api/team/invitations', ['type' => 'email', 'email' => 'x@example.test'])->assertJsonPath('email_sent', false);
+        \Illuminate\Support\Facades\Mail::assertNothingSent();
+    }
 }

@@ -202,4 +202,66 @@ class InvoiceTest extends TestCase
         $this->as($this->owner)->putJson('/api/billing-profile', $this->profilePayload(['series' => '2027-']))
             ->assertOk()->assertJsonPath('profile.next_number', 1);
     }
+
+    public function test_billing_logo_accepts_png_data_uri_and_rejects_invalid_payloads(): void
+    {
+        $this->readyProfile();
+        $png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+        $this->as($this->owner)->putJson('/api/billing-profile/logo', ['logo' => $png])
+            ->assertOk()
+            ->assertJsonPath('profile.logo', $png);
+
+        $this->as($this->owner)->putJson('/api/billing-profile/logo', ['logo' => 'data:image/gif;base64,AAAA'])
+            ->assertStatus(422);
+        $this->as($this->owner)->putJson('/api/billing-profile/logo', ['logo' => 'hola'])
+            ->assertStatus(422);
+
+        $this->as($this->owner)->deleteJson('/api/billing-profile/logo')
+            ->assertOk()
+            ->assertJsonPath('profile.logo', null);
+    }
+
+    public function test_yearly_series_rolls_forward_on_first_invoice_of_the_new_year(): void
+    {
+        $this->as($this->owner)->putJson('/api/billing-profile', $this->profilePayload([
+            'series' => '2025-',
+            'yearly_series' => true,
+            'next_number' => 12,
+        ]))->assertOk();
+
+        \Carbon\Carbon::setTestNow(\Carbon\Carbon::parse('2026-01-15 10:00:00', 'Europe/Madrid'));
+        try {
+            $ruta = $this->completedRuta(['trip_date' => '2026-01-10']);
+            $this->as($this->owner)->postJson("/api/rutas/{$ruta->id}/invoice", ['concept' => 'Viaje', 'total' => 40])
+                ->assertCreated()
+                ->assertJsonPath('full_number', '2026-0001');
+
+            $this->as($this->owner)->getJson('/api/billing-profile')
+                ->assertOk()
+                ->assertJsonPath('profile.series', '2026-')
+                ->assertJsonPath('profile.next_number', 2);
+        } finally {
+            \Carbon\Carbon::setTestNow();
+        }
+    }
+
+    public function test_yearly_series_can_be_disabled(): void
+    {
+        $this->as($this->owner)->putJson('/api/billing-profile', $this->profilePayload([
+            'series' => '2025-',
+            'yearly_series' => false,
+            'next_number' => 3,
+        ]))->assertOk();
+
+        \Carbon\Carbon::setTestNow(\Carbon\Carbon::parse('2026-02-01 10:00:00', 'Europe/Madrid'));
+        try {
+            $ruta = $this->completedRuta(['trip_date' => '2026-01-20']);
+            $this->as($this->owner)->postJson("/api/rutas/{$ruta->id}/invoice", ['concept' => 'Viaje', 'total' => 40])
+                ->assertCreated()
+                ->assertJsonPath('full_number', '2025-0003');
+        } finally {
+            \Carbon\Carbon::setTestNow();
+        }
+    }
 }

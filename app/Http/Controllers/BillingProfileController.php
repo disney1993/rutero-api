@@ -22,6 +22,7 @@ class BillingProfileController extends Controller
             'series' => now()->format('Y').'-',
             'activity' => 'passengers',
             'vat_rate' => 10,
+            'yearly_series' => true,
         ]);
 
         return response()->json($this->present($profile));
@@ -60,6 +61,7 @@ class BillingProfileController extends Controller
             'vat_rate' => ['required', 'numeric', Rule::in(BillingProfile::VAT_RATES)],
             'exemption_reason' => ['nullable', 'required_if:vat_rate,0', 'string', 'max:200'],
             'series' => ['required', 'string', 'max:10', 'regex:/^[A-Za-z0-9\-\/]+$/'],
+            'yearly_series' => ['sometimes', 'boolean'],
             'next_number' => ['sometimes', 'integer', 'min:1', 'max:999999'],
             'licence' => ['nullable', 'string', 'max:40'],
             'email' => ['nullable', 'email:rfc', 'max:120'],
@@ -98,13 +100,64 @@ class BillingProfileController extends Controller
         return response()->json($this->present($profile->fresh()));
     }
 
+    /** Logotipo para las facturas: data URI PNG o JPEG de hasta 300 KB. */
+    public function updateLogo(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (! $user->hasOwnerCapability()) {
+            return response()->json(['message' => 'Necesitas al menos un vehículo para facturar'], 403);
+        }
+        $data = $request->validate(['logo' => ['required', 'string', 'max:500000']]);
+
+        if (! preg_match('#^data:image/(png|jpeg);base64,([A-Za-z0-9+/=]+)$#', $data['logo'], $m)) {
+            return $this->logoError('El logotipo debe ser una imagen PNG o JPG.');
+        }
+        $binary = base64_decode($m[2], true);
+        if ($binary === false || strlen($binary) > BillingProfile::LOGO_MAX_BYTES) {
+            return $this->logoError('El logotipo no puede superar los 300 KB.');
+        }
+        $info = @getimagesizefromstring($binary);
+        if (! $info || ! in_array($info['mime'] ?? '', ['image/png', 'image/jpeg'], true)) {
+            return $this->logoError('El archivo no es una imagen válida.');
+        }
+
+        $profile = BillingProfile::firstOrNew(['user_id' => $user->id]);
+        $profile->logo = $data['logo'];
+        $profile->save();
+
+        return response()->json($this->present($profile->fresh()));
+    }
+
+    public function deleteLogo(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if (! $user->hasOwnerCapability()) {
+            return response()->json(['message' => 'Necesitas al menos un vehículo para facturar'], 403);
+        }
+        $profile = BillingProfile::where('user_id', $user->id)->first();
+        if ($profile) {
+            $profile->update(['logo' => null]);
+        }
+
+        return response()->json($this->present($profile ?? new BillingProfile));
+    }
+
+    private function logoError(string $message): JsonResponse
+    {
+        return response()->json(['message' => $message, 'errors' => ['logo' => [$message]]], 422);
+    }
+
     private function present(BillingProfile $profile): array
     {
+        $data = $profile->only([
+            'issuer_type', 'legal_name', 'tax_id', 'address_line', 'postal_code', 'city', 'province',
+            'activity', 'vat_rate', 'exemption_reason', 'series', 'yearly_series', 'next_number', 'licence', 'email', 'phone', 'iban', 'logo',
+        ]);
+        // Sin fila en BD (o migración antigua) se asume serie anual activada.
+        $data['yearly_series'] = (bool) ($data['yearly_series'] ?? true);
+
         return [
-            'profile' => $profile->only([
-                'issuer_type', 'legal_name', 'tax_id', 'address_line', 'postal_code', 'city', 'province',
-                'activity', 'vat_rate', 'exemption_reason', 'series', 'next_number', 'licence', 'email', 'phone', 'iban',
-            ]),
+            'profile' => $data,
             'ready' => $profile->exists && $profile->isReady(),
             'missing' => $profile->exists ? $profile->missing() : BillingProfile::REQUIRED,
             'simplified_limit' => $profile->simplifiedLimit(),

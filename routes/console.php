@@ -16,4 +16,7 @@ Artisan::command('inspire', function () {
 //   ejecuta. En Laravel Cloud se activa en el entorno (Scheduler); en un VPS,
 //   con la línea de cron "* * * * * php artisan schedule:run". Verificarlo
 //   antes de las pruebas con usuarios (ver capítulo 4 del TFM).
+// Gastos periódicos: una vez al día crea los del mes que ya tocan.
+Schedule::command('expenses:generate-recurring')->dailyAt('06:00')->timezone(config('rutero.auto_complete.timezone'))->withoutOverlapping();
+
 Schedule::command('rutas:auto-complete')->everyMinute()->withoutOverlapping();

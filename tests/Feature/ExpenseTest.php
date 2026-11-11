@@ -141,4 +141,48 @@ class ExpenseTest extends TestCase
         $this->as($this->owner)->getJson('/api/reports/user-analytics?period=month&date=2026-03-15&role=owner')
             ->assertJsonPath('counters.expenses', 0);
     }
+    public function test_deductible_defaults_by_category_and_can_be_overridden(): void
+    {
+        $this->as($this->owner)->postJson('/api/expenses', $this->payload())->assertCreated()->assertJsonPath('deductible', true);
+        $this->as($this->owner)->postJson('/api/expenses', $this->payload(['category' => 'fines', 'amount' => 200]))
+            ->assertCreated()->assertJsonPath('deductible', false);
+        $this->as($this->owner)->postJson('/api/expenses', $this->payload(['category' => 'workshop', 'amount' => 10, 'deductible' => false]))
+            ->assertCreated()->assertJsonPath('deductible', false);
+
+        $this->as($this->owner)->getJson('/api/expenses?from=2026-03-01&to=2026-03-31')
+            ->assertJsonPath('total', 270.5)->assertJsonPath('deductible_total', 60.5);
+        $this->as($this->owner)->getJson('/api/reports/user-analytics?period=month&date=2026-03-15&role=owner')
+            ->assertJsonPath('counters.expenses_deductible', 60.5);
+    }
+
+    public function test_recurring_expenses_are_created_each_month_once_and_stop_when_disabled(): void
+    {
+        $template = $this->as($this->owner)->postJson('/api/expenses', $this->payload([
+            'category' => 'insurance', 'amount' => 90, 'date' => '2026-01-31', 'recurring_monthly' => true,
+        ]))->assertCreated()->json();
+
+        // A 15 de abril: febrero (día 28) y marzo (31), pero no abril (aún no es día 30).
+        $created = \App\Console\Commands\GenerateRecurringExpenses::generate(\Carbon\CarbonImmutable::parse('2026-04-15'));
+        $this->assertSame(2, $created);
+        $this->assertSame(['2026-02-28', '2026-03-31'], Expense::where('recurring_parent_id', $template['id'])->orderBy('date')->get()->map(fn ($e) => $e->date->toDateString())->all());
+
+        // No duplica, aunque una copia se haya borrado.
+        Expense::where('recurring_parent_id', $template['id'])->whereMonth('date', 2)->first()->delete();
+        $this->assertSame(0, \App\Console\Commands\GenerateRecurringExpenses::generate(\Carbon\CarbonImmutable::parse('2026-04-20')));
+
+        $this->assertSame(1, \App\Console\Commands\GenerateRecurringExpenses::generate(\Carbon\CarbonImmutable::parse('2026-04-30')));
+
+        // Al desactivarlo deja de repetirse.
+        $this->as($this->owner)->patchJson("/api/expenses/{$template['id']}", ['recurring_monthly' => false])->assertOk();
+        $this->assertSame(0, \App\Console\Commands\GenerateRecurringExpenses::generate(\Carbon\CarbonImmutable::parse('2026-06-30')));
+
+        // Una copia no puede convertirse en plantilla.
+        $copy = Expense::where('recurring_parent_id', $template['id'])->first();
+        $this->as($this->owner)->patchJson("/api/expenses/{$copy->id}", ['recurring_monthly' => true])->assertJsonValidationErrors('recurring_monthly');
+    }
+
+    public function test_recurring_command_runs_from_artisan(): void
+    {
+        $this->artisan('expenses:generate-recurring')->assertSuccessful();
+    }
 }

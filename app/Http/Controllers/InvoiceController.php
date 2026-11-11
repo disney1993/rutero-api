@@ -139,6 +139,7 @@ class InvoiceController extends Controller
         $invoice = DB::transaction(function () use ($owner, $attrs, $recipient, $data) {
             // Bloqueo del perfil: dos emisiones a la vez no pueden repetir número.
             $profile = BillingProfile::where('user_id', $owner->id)->lockForUpdate()->first();
+            $profile->rollYearlySeries((int) now(config('rutero.auto_complete.timezone'))->format('Y'));
 
             return $this->issue($owner, $profile, $attrs + [
                 'series' => $profile->series,
@@ -186,6 +187,7 @@ class InvoiceController extends Controller
 
         $corrective = DB::transaction(function () use ($owner, $invoice, $data) {
             $profile = BillingProfile::where('user_id', $owner->id)->lockForUpdate()->firstOrFail();
+            $profile->rollYearlySeries((int) now(config('rutero.auto_complete.timezone'))->format('Y'));
             $series = 'R'.$profile->series;
 
             return $this->issue($owner, $profile, [
@@ -304,7 +306,11 @@ class InvoiceController extends Controller
     private function pdfResponse(Invoice $invoice, bool $draft = false)
     {
         $titles = ['simplified' => 'Factura simplificada', 'full' => 'Factura', 'corrective' => 'Factura rectificativa'];
+        // El logotipo es el actual del emisor (no forma parte de los datos
+        // fiscales que se copian en la factura).
+        $logo = BillingProfile::where('user_id', $invoice->owner_id)->value('logo');
         $pdf = Pdf::loadView('invoices.invoice', [
+            'logo' => $logo,
             'invoice' => $invoice,
             'title' => $titles[$invoice->type] ?? 'Factura',
             'draft' => $draft,

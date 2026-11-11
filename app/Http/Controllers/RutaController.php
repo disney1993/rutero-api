@@ -408,14 +408,11 @@ class RutaController extends Controller
         return response()->json($ruta);
     }
 
-    // TODO(rutero): "Todo correcto" de un conductor con viajes sin asignar.
-    //   Confirmar un viaje sin conductor lo asigna a quien confirma. Si dos
-    //   conductores comparten jornada, el primero que pulse "Todo correcto"
-    //   en la app se queda con todos los viajes sin asignar cerrados ese día,
-    //   aunque algunos los hiciera el otro. Opciones: no ofrecer "Todo
-    //   correcto" a los conductores (solo "Correcto" uno a uno) o no asignar
-    //   en la confirmación masiva. Ver AutoCompleteReviewModal en la app.
     // "Correcto": marca como revisado un cierre automático sin cambiar nada.
+    // Un viaje sin conductor se asigna a quien confirma (solo en confirmación
+    // individual). La app no incluye viajes sin asignar en "Todo correcto"
+    // de un conductor (AutoCompleteReviewModal), para no apropiarse de los
+    // de un compañero de jornada.
     public function review(Request $request, Ruta $ruta): JsonResponse
     {
         $user = $request->user();

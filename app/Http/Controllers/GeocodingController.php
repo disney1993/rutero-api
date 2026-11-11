@@ -16,13 +16,10 @@ use Illuminate\Support\Facades\Log;
 // TODO: si se configura GOOGLE_MAPS_API_KEY, usar Distance Matrix / Routes
 // como primario o fallback, y deep-link de navegación en la app.
 /*
- * TODO(rutero): sustituir Nominatim por Photon en el autocompletado.
- *   La política de uso de Nominatim prohíbe el autocompletado mientras se
- *   escribe (máx. 1 petición/s, sin "search-as-you-type"). Photon (Komoot)
- *   está pensado para ello y usa los mismos datos de OpenStreetMap:
- *   https://photon.komoot.io/api/?q=...&lang=es&bbox=<España>. En
- *   producción, autoalojarlo (Docker) o usar openrouteservice. Mantener la
- *   caché y el formato de respuesta actual para no tocar la app.
+ * Direcciones: Photon (Komoot, datos de OpenStreetMap), pensado para el
+ * autocompletado mientras se escribe, y Nominatim como respaldo si Photon
+ * falla o no encuentra nada (Nominatim prohíbe el autocompletado como uso
+ * principal). PHOTON_URL permite apuntar a un Photon autoalojado.
  * TODO(rutero): OSRM de demostración no es apto para producción.
  *   router.project-osrm.org es un servicio de pruebas (1 petición/s, sin
  *   garantías). Autoalojar OSRM con el extracto de España o usar
@@ -34,6 +31,50 @@ class GeocodingController extends Controller
     private const OSRM_URL = 'https://router.project-osrm.org/route/v1/driving';
     // Nominatim exige un User-Agent que identifique la aplicación.
     private const USER_AGENT = 'RuteroApp/1.0 (contacto: soporte@rutero.local)';
+
+    /** Photon: resultados de España con el mismo formato que Nominatim. */
+    private function searchPhoton(string $query): array
+    {
+        $resp = Http::withHeaders(['User-Agent' => self::USER_AGENT])
+            ->timeout(5)
+            ->get(config('rutero.geocoding.photon_url'), [
+                'q' => $query,
+                'limit' => 8,
+                // Península, Baleares y Canarias; luego se filtra por país.
+                'bbox' => '-18.2,27.6,4.4,43.9',
+            ]);
+        if (! $resp->ok()) {
+            throw new \RuntimeException('Photon respondió '.$resp->status());
+        }
+
+        return collect($resp->json('features') ?? [])
+            ->filter(fn ($f) => ($f['properties']['countrycode'] ?? null) === 'ES')
+            ->map(function ($f) {
+                $p = $f['properties'];
+                $street = $p['street'] ?? null;
+                $first = $street
+                    ? trim($street.' '.($p['housenumber'] ?? ''))
+                    : ($p['name'] ?? null);
+                $parts = array_filter([
+                    $first,
+                    ($p['name'] ?? null) !== $first && $street ? ($p['name'] ?? null) : null,
+                    $p['city'] ?? ($p['town'] ?? ($p['village'] ?? null)),
+                    $p['state'] ?? null,
+                    $p['postcode'] ?? null,
+                ]);
+
+                return [
+                    'display_name' => implode(', ', array_unique($parts)),
+                    'lat' => (float) $f['geometry']['coordinates'][1],
+                    'lon' => (float) $f['geometry']['coordinates'][0],
+                ];
+            })
+            ->filter(fn ($r) => $r['display_name'] !== '')
+            ->unique('display_name')
+            ->take(6)
+            ->values()
+            ->all();
+    }
 
     public function search(Request $request)
     {
@@ -47,6 +88,18 @@ class GeocodingController extends Controller
         $cached = Cache::get($cacheKey);
         if ($cached !== null) {
             return response()->json($cached);
+        }
+
+        // 1) Photon; 2) si falla o no encuentra nada, Nominatim.
+        try {
+            $results = $this->searchPhoton($query);
+            if ($results !== []) {
+                Cache::put($cacheKey, $results, now()->addDay());
+
+                return response()->json($results);
+            }
+        } catch (\Throwable $e) {
+            Log::info('Photon search failed, falling back to Nominatim: '.$e->getMessage());
         }
 
         try {

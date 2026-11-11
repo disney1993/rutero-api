@@ -3,12 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Models\Jornada;
+use App\Mail\TeamInvitationMail;
 use App\Models\OwnerDriver;
 use App\Models\Ruta;
 use App\Models\User;
 use App\Models\Vehicle;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Validation\Rule;
 
 /**
@@ -100,17 +104,15 @@ class TeamController extends Controller
             ]);
         }
 
-        // TODO(rutero): enviar el correo de invitación desde el servidor.
-        //   Hoy la invitación por email solo se ve dentro de la app al entrar
-        //   con ese email; la app abre además el cliente de correo del móvil
-        //   (mailto:) para que el propietario la envíe él. Para enviarla
-        //   desde aquí: configurar MAIL_* en Laravel Cloud, crear un
-        //   Mailable con el enlace /i/{código} y encolarlo, sin cambiar la
-        //   respuesta (debe seguir sin revelar si la cuenta existe) y con
-        //   límite de envíos por propietario y día para evitar abusos.
+        // Correo de invitación (si hay servicio de correo configurado). Se
+        // envía exista o no la cuenta, así que tampoco revela nada.
+        $emailSent = ! ($existing && $existing->status === OwnerDriver::STATUS_ACTIVE)
+            && $this->sendInvitationEmail($owner, $email);
+
         // Misma respuesta en todos los casos: no revela si el email tiene cuenta.
         return response()->json([
             'message' => 'Invitación registrada. La persona la verá en Rutero al iniciar sesión con ese email.',
+            'email_sent' => $emailSent,
         ], 202);
     }
 
@@ -245,6 +247,33 @@ class TeamController extends Controller
     }
 
     // ----------------------------------------------------------------- helpers
+
+    /**
+     * Envía el correo de invitación respetando el límite diario por
+     * propietario. Un fallo del servicio de correo no impide la invitación:
+     * la persona la verá igualmente al entrar en la app.
+     */
+    private function sendInvitationEmail(User $owner, string $email): bool
+    {
+        if (! config('rutero.invitations.send_email')) {
+            return false;
+        }
+        $key = 'invite-emails:'.$owner->id.':'.now()->toDateString();
+        $sentToday = (int) Cache::get($key, 0);
+        if ($sentToday >= config('rutero.invitations.max_emails_per_day')) {
+            return false;
+        }
+        try {
+            Mail::to($email)->send(new TeamInvitationMail($owner, $email));
+        } catch (\Throwable $e) {
+            Log::warning('Invitation email failed: '.$e->getMessage());
+
+            return false;
+        }
+        Cache::put($key, $sentToday + 1, now()->endOfDay());
+
+        return true;
+    }
 
     private function canManageTeam(?User $user): bool
     {

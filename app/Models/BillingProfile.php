@@ -7,12 +7,9 @@ use Illuminate\Database\Eloquent\Model;
 
 /*
  * TODO(rutero): ampliar el perfil de facturación.
- *  - Logotipo (ver invoice.blade.php).
  *  - Retención de IRPF si algún día se facturan servicios profesionales
  *    (el transporte es actividad empresarial y hoy no lleva retención).
  *  - Recargo de equivalencia y regímenes especiales: no contemplados.
- *  - Serie por año automática: hoy el propietario cambia la serie a mano
- *    al empezar el año (BillingProfileController reinicia el número a 1).
  */
 /**
  * Datos fiscales del emisor de las facturas (el propietario). Se guardan una
@@ -43,14 +40,39 @@ class BillingProfile extends Model
     protected $fillable = [
         'user_id', 'issuer_type', 'legal_name', 'tax_id', 'address_line', 'postal_code', 'city', 'province',
         'activity', 'vat_rate', 'exemption_reason', 'series', 'next_number', 'next_corrective_number',
-        'licence', 'email', 'phone', 'iban',
+        'licence', 'email', 'phone', 'iban', 'logo', 'yearly_series',
     ];
 
     protected $casts = [
         'vat_rate' => 'float',
         'next_number' => 'integer',
         'next_corrective_number' => 'integer',
+        'yearly_series' => 'boolean',
     ];
+
+    /** Tamaño máximo del logotipo una vez decodificado. */
+    public const LOGO_MAX_BYTES = 300 * 1024;
+
+    /**
+     * Serie anual: si la serie empieza por un año anterior al actual
+     * ("2026-" en 2027), la cambia por el año actual y reinicia la
+     * numeración (también la de las rectificativas). Se llama al emitir,
+     * dentro de la transacción con el perfil bloqueado.
+     */
+    public function rollYearlySeries(int $currentYear): void
+    {
+        if (! $this->yearly_series || ! preg_match('/^(\d{4})(.*)$/', (string) $this->series, $m) || (int) $m[1] >= $currentYear) {
+            return;
+        }
+        $newSeries = $currentYear.$m[2];
+        $issued = Invoice::where('owner_id', $this->user_id)->where('series', $newSeries)->exists();
+        $this->series = $newSeries;
+        if (! $issued) {
+            $this->next_number = 1;
+            $this->next_corrective_number = 1;
+        }
+        $this->save();
+    }
 
     public function user()
     {

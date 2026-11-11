@@ -34,6 +34,7 @@ class ExpenseController extends Controller
                 'links' => $c['links'],
                 'driver_required' => (bool) ($c['driver_required'] ?? false),
                 'description_required' => (bool) ($c['description_required'] ?? false),
+                'deductible' => (bool) ($c['deductible'] ?? true),
             ];
         }
 
@@ -67,6 +68,7 @@ class ExpenseController extends Controller
         return response()->json([
             'data' => $query->with(self::WITH)->orderByDesc('date')->orderByDesc('id')->get(),
             'total' => round((float) $byCategory->sum('total'), 2),
+            'deductible_total' => round((float) (clone $query)->where('deductible', true)->sum('amount'), 2),
             'by_category' => $byCategory,
         ]);
     }
@@ -136,6 +138,8 @@ class ExpenseController extends Controller
             'driver_id' => ['sometimes', 'nullable', 'integer'],
             'payment_method' => ['sometimes', 'nullable', Rule::in(Expense::PAYMENT_METHODS)],
             'notes' => ['sometimes', 'nullable', 'string', 'max:1000'],
+            'deductible' => ['sometimes', 'boolean'],
+            'recurring_monthly' => ['sometimes', 'boolean'],
         ], [
             'amount.gt' => 'El importe debe ser mayor que 0.',
             'date.before_or_equal' => 'La fecha no puede ser posterior a dentro de un año.',
@@ -179,6 +183,16 @@ class ExpenseController extends Controller
         }
         if (! in_array('driver', $conf['links'], true)) {
             $data['driver_id'] = null;
+        }
+        // Deducible: si no se indica al crear, el valor por defecto de la categoría.
+        if (! $current && ! array_key_exists('deductible', $data)) {
+            $data['deductible'] = (bool) ($conf['deductible'] ?? true);
+        }
+        // Solo una plantilla (no una copia generada) puede repetirse cada mes.
+        if ($current?->recurring_parent_id && ! empty($data['recurring_monthly'])) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'recurring_monthly' => 'Este gasto ya es una copia de un gasto mensual: edita el original.',
+            ]);
         }
 
         return $data;

@@ -1,0 +1,21 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, master, equipo-conductores]
+  pull_request:
+
+jobs:
+  phpunit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, sqlite, pdo_sqlite, gd
+          coverage: none
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
+      - name: Run PHPUnit
+        run: php artisan test

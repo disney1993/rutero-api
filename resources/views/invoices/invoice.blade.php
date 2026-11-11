@@ -48,10 +48,9 @@
     <table class="head">
         <tr>
             <td style="width: 55%;">
-                {{-- TODO(rutero): logotipo del emisor. Añadir subida de imagen en
-                     Datos de facturación (PNG/JPG, máx. 512 KB, guardada en
-                     almacenamiento persistente, no en el disco local de Laravel
-                     Cloud) e incrustarla aquí en base64 para DomPDF. --}}
+                @if (! empty($logo))
+                    <img src="{{ $logo }}" alt="" style="max-height: 56px; max-width: 200px; margin-bottom: 8px;">
+                @endif
                 <div class="issuer-name">{{ $issuer['legal_name'] ?? '' }}</div>
                 <div>NIF: {{ $issuer['tax_id'] ?? '' }}</div>
                 <div>{{ $issuer['address_line'] ?? '' }}</div>

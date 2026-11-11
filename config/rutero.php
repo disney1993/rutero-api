@@ -18,6 +18,19 @@ return [
         'default_duration_min' => 60,
     ],
 
+    // Invitaciones al equipo por email. Se envían desde el servidor solo si
+    // hay un servicio de correo real (MAIL_MAILER distinto de log/array); si
+    // no, la app abre el correo del móvil para que las envíe el propietario.
+    'invitations' => [
+        'send_email' => (bool) env('RUTERO_SEND_INVITE_EMAILS', ! in_array(env('MAIL_MAILER', 'log'), ['log', 'array'], true)),
+        'max_emails_per_day' => (int) env('RUTERO_MAX_INVITE_EMAILS_PER_DAY', 20),
+    ],
+
+    // Geocodificación: Photon (autocompletado) con Nominatim de respaldo.
+    'geocoding' => [
+        'photon_url' => env('PHOTON_URL', 'https://photon.komoot.io/api/'),
+    ],
+
     // Enlaces de invitación (/i/{código}): abren la app instalada o, si no lo
     // está, ofrecen descargarla. download_url = APK de EAS o ficha de la tienda.
     'app_links' => [

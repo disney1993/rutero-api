@@ -37,6 +37,7 @@
         <tr><td>% completados</td><td class="right">{{ number_format($counters['completion_rate'], 2, ',', '.') }}%</td></tr>
         @if ($withExpenses ?? false)
             <tr><td>Gastos</td><td class="right">{{ number_format($counters['expenses'], 2, ',', '.') }}</td></tr>
+            <tr><td>de los que deducibles</td><td class="right">{{ number_format($counters['expenses_deductible'] ?? 0, 2, ',', '.') }}</td></tr>
             <tr><td><strong>Beneficio (ingresos - gastos)</strong></td><td class="right"><strong>{{ number_format($counters['net'], 2, ',', '.') }}</strong></td></tr>
         @endif
     </table>

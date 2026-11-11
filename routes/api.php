@@ -86,6 +86,8 @@ Route::middleware('auth:sanctum')->group(function () {
     // Facturación: datos fiscales del emisor, facturas de los viajes y destinatarios
     Route::get('/billing-profile', [\App\Http\Controllers\BillingProfileController::class, 'show']);
     Route::put('/billing-profile', [\App\Http\Controllers\BillingProfileController::class, 'update']);
+    Route::put('/billing-profile/logo', [\App\Http\Controllers\BillingProfileController::class, 'updateLogo']);
+    Route::delete('/billing-profile/logo', [\App\Http\Controllers\BillingProfileController::class, 'deleteLogo']);
     Route::get('/rutas/{ruta}/invoice', [\App\Http\Controllers\InvoiceController::class, 'forRuta'])->withTrashed();
     Route::post('/rutas/{ruta}/invoice', [\App\Http\Controllers\InvoiceController::class, 'store'])->middleware('throttle:30,1');
     Route::get('/invoices', [\App\Http\Controllers\InvoiceController::class, 'index']);
