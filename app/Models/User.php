@@ -29,6 +29,7 @@ class User extends Authenticatable
         'currency',
         'theme',
         'language',
+        'account_mode',
         'email',
         'password',
         'role',
@@ -41,6 +42,7 @@ class User extends Authenticatable
         'has_driver_capability',
         'is_admin',
         'is_premium',
+        'is_driver_only',
     ];
 
     /**
@@ -74,6 +76,21 @@ class User extends Authenticatable
         return $this->hasMany(Vehicle::class, 'owner_id');
     }
 
+    public function defaultVehicle()
+    {
+        return $this->hasOne(Vehicle::class, 'owner_id')->where('is_default', true);
+    }
+
+    public function jornadas()
+    {
+        return $this->hasMany(Jornada::class, 'owner_id');
+    }
+
+    public function jornadaDriverEntries()
+    {
+        return $this->hasMany(JornadaDriverEntry::class, 'driver_id');
+    }
+
     public function ownerMonthCodes()
     {
         return $this->hasMany(OwnerMonthCode::class, 'owner_id');
@@ -86,12 +103,15 @@ class User extends Authenticatable
 
     public function hasOwnerCapability(): bool
     {
-        return $this->vehicles()->exists() || $this->ownerMonthCodes()->exists();
+        return $this->vehicles()->exists()
+            || $this->jornadas()->exists()
+            || $this->ownerMonthCodes()->exists();
     }
 
     public function hasDriverCapability(): bool
     {
-        return $this->driverCodeEntries()->exists();
+        return $this->jornadaDriverEntries()->exists()
+            || $this->driverCodeEntries()->exists();
     }
 
     public function isAdmin(): bool
@@ -103,6 +123,11 @@ class User extends Authenticatable
     {
         return $this->plan === 'premium'
             && (! $this->premium_expires_at || $this->premium_expires_at->isFuture());
+    }
+
+    public function isDriverOnly(): bool
+    {
+        return ($this->account_mode ?? 'owner') === 'driver';
     }
 
     public function getHasOwnerCapabilityAttribute(): bool
@@ -123,5 +148,10 @@ class User extends Authenticatable
     public function getIsPremiumAttribute(): bool
     {
         return $this->isPremium();
+    }
+
+    public function getIsDriverOnlyAttribute(): bool
+    {
+        return $this->isDriverOnly();
     }
 }

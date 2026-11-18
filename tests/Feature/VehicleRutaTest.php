@@ -30,12 +30,20 @@ class VehicleRutaTest extends TestCase
 
         // create ruta using vehicle
         $ruta = $this->withHeaders(['Authorization' => 'Bearer ' . $token])->postJson('/api/rutas', [
-            'client_name' => 'Client', 'origin' => 'Origen A', 'destination' => 'Destino B', 'trip_date' => date('Y-m-d'), 'vehicle_id' => $vehicleId
+            'client_name' => 'Client',
+            'client_phone' => '+34600111222',
+            'origin' => 'Origen A',
+            'destination' => 'Destino B',
+            'trip_date' => date('Y-m-d'),
+            'trip_time' => '10:00',
+            'final_price' => 50,
+            'vehicle_id' => $vehicleId,
         ]);
         $ruta->assertStatus(201)->assertJson(['vehicle_id' => $vehicleId]);
 
-        // attempt to delete vehicle should fail
+        // attempt to soft-delete vehicle should succeed even with associated rutas
         $del = $this->withHeaders(['Authorization' => 'Bearer ' . $token])->deleteJson('/api/vehicles/' . $vehicleId);
-        $del->assertStatus(422);
+        $del->assertStatus(200);
+        $this->assertSoftDeleted('vehicles', ['id' => $vehicleId]);
     }
 }

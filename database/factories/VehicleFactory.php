@@ -29,9 +29,17 @@ class VehicleFactory extends Factory
             'color' => $this->faker->safeColorName(),
             'year' => $this->faker->numberBetween(2012, 2024),
             'seats' => $this->faker->randomElement([4, 5, 7]),
-            'vehicle_type' => $this->faker->randomElement(['sedan', 'suv', 'compacto', 'monovolumen']),
+            'vehicle_type' => $this->faker->randomElement([
+                'turismo', 'furgoneta', 'camion', 'autobus', 'moto',
+            ]),
             'active' => true,
+            'is_default' => false,
             'notes' => null,
         ];
+    }
+
+    public function default(): static
+    {
+        return $this->state(fn () => ['is_default' => true]);
     }
 }

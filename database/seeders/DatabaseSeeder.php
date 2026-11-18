@@ -24,7 +24,7 @@ class DatabaseSeeder extends Seeder
                 'avatar' => 'http://example.com/admin.png',
                 'password' => 'secret123',
                 'role' => 'admin',
-                'price_per_km' => 0.75,
+                'price_per_km' => 1.10,
             ]
         );
 
@@ -37,7 +37,7 @@ class DatabaseSeeder extends Seeder
                 'avatar' => 'http://example.com/owner.png',
                 'password' => 'secret123',
                 'role' => 'user',
-                'price_per_km' => 0.75,
+                'price_per_km' => 1.10,
             ]
         );
 
@@ -63,7 +63,7 @@ class DatabaseSeeder extends Seeder
                 'avatar' => 'http://example.com/driver.png',
                 'password' => 'secret123',
                 'role' => 'user',
-                'price_per_km' => 0.75,
+                'price_per_km' => 1.10,
             ]
         );
 

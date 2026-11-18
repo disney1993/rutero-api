@@ -230,13 +230,13 @@ class AuthTest extends TestCase
         $resp->assertStatus(422)->assertJsonValidationErrors(['password']);
     }
 
-    public function test_register_defaults_price_per_km_to_075()
+    public function test_register_defaults_price_per_km_to_market_rate()
     {
         $resp = $this->postJson('/api/register', [
             'first_name' => 'Default', 'last_name' => 'Price',
             'email' => 'defaultprice@example.test', 'password' => 'Secret123!',
         ]);
-        $resp->assertStatus(200)->assertJsonPath('user.price_per_km', 0.75);
+        $resp->assertStatus(200)->assertJsonPath('user.price_per_km', 1.1);
     }
 
     public function test_updating_currency_alone_does_not_clear_price_per_km()
@@ -246,14 +246,14 @@ class AuthTest extends TestCase
             'email' => 'curronly@example.test', 'password' => 'Secret123!',
         ]);
         $token = $register->json('access_token');
-        $this->assertEquals(0.75, $register->json('user.price_per_km'));
+        $this->assertEquals(1.1, $register->json('user.price_per_km'));
 
         $resp = $this->withHeader('Authorization', "Bearer $token")
             ->patchJson('/api/user/preferences', ['currency' => 'USD']);
 
         $resp->assertStatus(200)
             ->assertJsonPath('currency', 'USD')
-            ->assertJsonPath('price_per_km', 0.75);
+            ->assertJsonPath('price_per_km', 1.1);
     }
 
     public function test_user_can_update_theme_and_language()
@@ -284,6 +284,52 @@ class AuthTest extends TestCase
             ->patchJson('/api/user/preferences', ['theme' => 'blue', 'language' => 'fr']);
 
         $resp->assertStatus(422)->assertJsonValidationErrors(['theme', 'language']);
+    }
+
+    public function test_user_can_update_account_mode(): void
+    {
+        $register = $this->postJson('/api/register', [
+            'first_name' => 'Mode', 'last_name' => 'User',
+            'email' => 'modeuser@example.test', 'password' => 'Secret123!',
+        ]);
+        $token = $register->json('access_token');
+
+        $this->withHeader('Authorization', "Bearer $token")
+            ->patchJson('/api/user/preferences', ['account_mode' => 'driver'])
+            ->assertOk()
+            ->assertJsonPath('account_mode', 'driver')
+            ->assertJsonPath('is_driver_only', true);
+    }
+
+    public function test_non_admin_cannot_set_account_mode_both(): void
+    {
+        $register = $this->postJson('/api/register', [
+            'first_name' => 'Mode', 'last_name' => 'NoBoth',
+            'email' => 'noboth@example.test', 'password' => 'Secret123!',
+        ]);
+        $token = $register->json('access_token');
+
+        $this->withHeader('Authorization', "Bearer $token")
+            ->patchJson('/api/user/preferences', ['account_mode' => 'both'])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['account_mode']);
+    }
+
+    public function test_admin_can_set_account_mode_both(): void
+    {
+        $register = $this->postJson('/api/register', [
+            'first_name' => 'Mode', 'last_name' => 'Admin',
+            'email' => 'modeadmin@example.test', 'password' => 'Secret123!',
+        ]);
+        $userId = $register->json('user.id');
+        $token = $register->json('access_token');
+        \App\Models\User::where('id', $userId)->update(['role' => 'admin']);
+        $this->app['auth']->forgetGuards();
+
+        $this->withHeader('Authorization', "Bearer $token")
+            ->patchJson('/api/user/preferences', ['account_mode' => 'both'])
+            ->assertOk()
+            ->assertJsonPath('account_mode', 'both');
     }
 
     public function test_login_without_password_returns_validation_error_not_crash()
@@ -336,6 +382,6 @@ class AuthTest extends TestCase
         $user = $gresp->json('user');
         $this->assertEquals('gdriver@example.test', $user['email']);
         $this->assertEquals('user', $user['role']);
-        $this->assertEquals(0.75, $user['price_per_km']);
+        $this->assertEquals(1.1, $user['price_per_km']);
     }
 }

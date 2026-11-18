@@ -81,7 +81,15 @@ class AdminUserManagementTest extends TestCase
         $this->withHeader('Authorization', "Bearer $ownerToken")
             ->postJson('/api/vehicles', ['plate' => 'DEL-001'])->assertStatus(201);
         $this->withHeader('Authorization', "Bearer $ownerToken")
-            ->postJson('/api/rutas', ['client_name' => 'Cliente', 'origin' => 'Origen', 'destination' => 'Destino'])
+            ->postJson('/api/rutas', [
+                'client_name' => 'Cliente',
+                'client_phone' => '+34600111222',
+                'origin' => 'Origen',
+                'destination' => 'Destino',
+                'trip_date' => date('Y-m-d'),
+                'trip_time' => '10:00',
+                'final_price' => 50,
+            ])
             ->assertStatus(201);
 
         $this->app['auth']->forgetGuards();
@@ -121,17 +129,26 @@ class AdminUserManagementTest extends TestCase
 
         $this->app['auth']->forgetGuards();
         $this->withHeader('Authorization', "Bearer $ownerToken")->postJson('/api/vehicles', ['plate' => 'DRV-001'])->assertStatus(201);
-        $month = date('Y-m');
-        $code = $this->withHeader('Authorization', "Bearer $ownerToken")
-            ->postJson('/api/owner/codes', ['month' => $month])->json('code');
+        $jornada = $this->withHeader('Authorization', "Bearer $ownerToken")
+            ->postJson('/api/jornadas', ['date' => date('Y-m-d')])
+            ->assertCreated()
+            ->json();
 
         $this->app['auth']->forgetGuards();
         $this->withHeader('Authorization', "Bearer $driverToken")
-            ->postJson('/api/driver/join-code', ['code' => $code, 'month' => $month])->assertStatus(200);
+            ->postJson('/api/jornadas/join', ['code' => $jornada['code']])
+            ->assertStatus(200);
 
         $this->app['auth']->forgetGuards();
         $ruta = $this->withHeader('Authorization', "Bearer $driverToken")->postJson('/api/rutas', [
-            'client_name' => 'Cliente', 'origin' => 'Origen', 'destination' => 'Destino', 'owner_id' => $ownerId,
+            'client_name' => 'Cliente',
+            'client_phone' => '+34600111222',
+            'origin' => 'Origen',
+            'destination' => 'Destino',
+            'trip_date' => date('Y-m-d'),
+            'trip_time' => '10:00',
+            'final_price' => 50,
+            'jornada_id' => $jornada['id'],
         ]);
         $ruta->assertStatus(201);
         $rutaId = $ruta->json('id');
