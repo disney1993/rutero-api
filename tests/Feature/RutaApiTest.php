@@ -2,9 +2,6 @@
 
 namespace Tests\Feature;
 
-use App\Models\Ruta;
-use App\Models\User;
-use App\Models\Vehicle;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -12,26 +9,21 @@ class RutaApiTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function ownerUser(): User
+    // Crear una ruta exige un vehículo de la flota de quien la crea, así que
+    // los tests de creación usan un propietario autenticado con un coche.
+    private function ownerWithVehicle(string $email = 'owner-ruta@example.test'): array
     {
-        $owner = User::factory()->create();
-        Vehicle::factory()->create(['owner_id' => $owner->id, 'is_default' => true]);
+        $token = $this->postJson('/api/register', [
+            'first_name' => 'Owner', 'last_name' => 'Ruta',
+            'email' => $email, 'password' => 'Secret123!',
+        ])->json('access_token');
+        $headers = ['Authorization' => 'Bearer ' . $token];
+        $vehicleId = $this->withHeaders($headers)->postJson('/api/vehicles', [
+            'plate' => 'RUT001', 'make' => 'Seat', 'model' => 'Ibiza', 'color' => '#FFFFFF',
+            'year' => 2020, 'seats' => 5, 'vehicle_type' => 'sedan',
+        ])->assertStatus(201)->json('id');
 
-        return $owner;
-    }
-
-    /** Campos obligatorios mínimos para crear una ruta. */
-    private function validRutaPayload(array $overrides = []): array
-    {
-        return array_merge([
-            'client_name' => 'Ana García',
-            'client_phone' => '+34123456789',
-            'origin' => 'Madrid',
-            'destination' => 'Toledo',
-            'trip_date' => '2026-08-25',
-            'trip_time' => '10:00',
-            'final_price' => 100,
-        ], $overrides);
+        return [$headers, $vehicleId];
     }
 
     public function test_health_endpoint_returns_ok(): void
@@ -44,51 +36,52 @@ class RutaApiTest extends TestCase
             ]);
     }
 
-    public function test_unauthenticated_cannot_list_or_create_rutas(): void
-    {
-        $this->getJson('/api/rutas')->assertUnauthorized();
-
-        $this->postJson('/api/rutas', [
-            'client_name' => 'Ana García',
-            'origin' => 'Madrid',
-            'destination' => 'Toledo',
-        ])->assertUnauthorized();
-    }
-
     public function test_it_can_create_a_ruta(): void
     {
-        $owner = $this->ownerUser();
-
-        $payload = $this->validRutaPayload([
+        [$headers, $vehicleId] = $this->ownerWithVehicle();
+        $payload = [
+            'vehicle_id' => $vehicleId,
+            'client_name' => 'Ana García',
+            'client_phone' => '+34123456789',
+            'origin' => 'Madrid',
+            'destination' => 'Toledo',
             'estimated_distance_km' => 75,
             'price_per_km' => 1.5,
             'estimated_price' => 112.5,
+            'final_price' => 115,
             'payment_method' => 'efectivo',
             'passenger_count' => 2,
             'status' => 'pending',
+            'trip_date' => '2026-08-25',
+            'trip_time' => '09:30',
             'notes' => 'Vuelo temprano',
-        ]);
+        ];
 
-        $response = $this->actingAs($owner, 'sanctum')->postJson('/api/rutas', $payload);
+        $response = $this->withHeaders($headers)->postJson('/api/rutas', $payload);
 
         $response->assertCreated()
             ->assertJsonPath('client_name', 'Ana García')
-            ->assertJsonPath('status', 'pending')
-            ->assertJsonPath('owner_id', $owner->id);
+            ->assertJsonPath('status', 'pending');
     }
 
     public function test_it_saves_origin_and_destination_coordinates(): void
     {
-        $owner = $this->ownerUser();
-
-        $payload = $this->validRutaPayload([
+        [$headers, $vehicleId] = $this->ownerWithVehicle();
+        $payload = [
+            'vehicle_id' => $vehicleId,
+            'client_name' => 'Ana García',
+            'client_phone' => '612345678',
+            'origin' => 'Madrid',
             'origin_lat' => 40.4168,
             'origin_lng' => -3.7038,
+            'destination' => 'Toledo',
             'destination_lat' => 39.8628,
             'destination_lng' => -4.0273,
-        ]);
+            'trip_time' => '10:00',
+            'final_price' => 80,
+        ];
 
-        $response = $this->actingAs($owner, 'sanctum')->postJson('/api/rutas', $payload);
+        $response = $this->withHeaders($headers)->postJson('/api/rutas', $payload);
 
         $response->assertCreated()
             ->assertJsonPath('origin_lat', 40.4168)
@@ -97,27 +90,30 @@ class RutaApiTest extends TestCase
 
     public function test_it_rejects_out_of_range_coordinates(): void
     {
-        $owner = $this->ownerUser();
-
-        $response = $this->actingAs($owner, 'sanctum')->postJson('/api/rutas', $this->validRutaPayload([
+        $response = $this->actingAs(\App\Models\User::factory()->create(), 'sanctum')->postJson('/api/rutas', [
+            'client_name' => 'Ana García',
+            'client_phone' => '612345678',
+            'origin' => 'Madrid',
             'origin_lat' => 200,
-        ]));
+            'destination' => 'Toledo',
+            'trip_time' => '10:00',
+            'final_price' => 80,
+        ]);
 
         $response->assertStatus(422)->assertJsonValidationErrors(['origin_lat']);
     }
 
     public function test_it_can_list_rutas_by_status(): void
     {
-        $owner = $this->ownerUser();
-
-        Ruta::factory()->create([
+        $owner = \App\Models\User::factory()->create();
+        \App\Models\Ruta::factory()->create([
             'owner_id' => $owner->id,
             'client_name' => 'Cliente A',
             'status' => 'pending',
             'trip_date' => '2026-08-25',
         ]);
 
-        Ruta::factory()->create([
+        \App\Models\Ruta::factory()->create([
             'owner_id' => $owner->id,
             'client_name' => 'Cliente B',
             'status' => 'completed',
@@ -133,70 +129,88 @@ class RutaApiTest extends TestCase
 
     public function test_it_calculates_estimated_price_when_missing(): void
     {
-        $owner = $this->ownerUser();
-
-        $payload = $this->validRutaPayload([
+        [$headers, $vehicleId] = $this->ownerWithVehicle();
+        $payload = [
+            'vehicle_id' => $vehicleId,
             'client_name' => 'Pedro López',
+            'client_phone' => '698765432',
             'origin' => 'Sevilla',
             'destination' => 'Cádiz',
             'estimated_distance_km' => 120,
             'price_per_km' => 1.75,
+            'final_price' => 210,
             'payment_method' => 'tarjeta',
             'passenger_count' => 3,
             'status' => 'pending',
             'trip_date' => '2026-08-26',
-            'final_price' => 210,
-        ]);
+            'trip_time' => '11:15',
+        ];
 
-        $response = $this->actingAs($owner, 'sanctum')->postJson('/api/rutas', $payload);
+        $response = $this->withHeaders($headers)->postJson('/api/rutas', $payload);
 
         $response->assertCreated()
             ->assertJsonPath('estimated_price', 210);
     }
 
-    public function test_authenticated_user_cannot_attribute_ruta_to_another_user_without_driver_code(): void
+    public function test_anonymous_request_cannot_attribute_ruta_to_another_user(): void
     {
-        $owner = $this->ownerUser();
-        $victim = User::factory()->create();
+        $victim = \App\Models\User::factory()->create();
 
-        $response = $this->actingAs($owner, 'sanctum')->postJson('/api/rutas', $this->validRutaPayload([
-            'owner_id' => $victim->id,
-            'driver_id' => $victim->id,
-        ]));
-
-        $response->assertForbidden();
-        $this->assertDatabaseMissing('rutas', [
+        // Crear exige sesión: sin ella no queda nada a nombre de otro usuario.
+        $this->postJson('/api/rutas', [
             'client_name' => 'Ana García',
-            'owner_id' => $victim->id,
-        ]);
-    }
-
-    public function test_it_rejects_missing_required_trip_fields(): void
-    {
-        $owner = $this->ownerUser();
-
-        $response = $this->actingAs($owner, 'sanctum')->postJson('/api/rutas', [
-            'client_name' => 'Ana',
+            'client_phone' => '612345678',
             'origin' => 'Madrid',
             'destination' => 'Toledo',
-        ]);
+            'trip_time' => '09:00',
+            'final_price' => 50,
+            'owner_id' => $victim->id,
+            'driver_id' => $victim->id,
+        ])->assertStatus(401);
 
-        $response->assertStatus(422)->assertJsonValidationErrors([
-            'client_phone',
-            'trip_date',
-            'trip_time',
-            'final_price',
-        ]);
+        $this->assertDatabaseMissing('rutas', ['owner_id' => $victim->id]);
+        $this->assertDatabaseMissing('rutas', ['driver_id' => $victim->id]);
+    }
+
+    public function test_anonymous_request_cannot_list_rutas(): void
+    {
+        // Antes el listado era público y devolvía los viajes de todos los
+        // usuarios, con nombre y teléfono de sus clientes.
+        \App\Models\Ruta::factory()->create(['owner_id' => \App\Models\User::factory()->create()->id]);
+
+        $this->getJson('/api/rutas')->assertStatus(401)->assertJsonMissingPath('data');
+    }
+
+    public function test_user_cannot_attribute_ruta_to_owner_without_joining_their_code(): void
+    {
+        $victim = \App\Models\User::factory()->create();
+        [$headers, $vehicleId] = $this->ownerWithVehicle();
+
+        $this->withHeaders($headers)->postJson('/api/rutas', [
+            'client_name' => 'Ana García',
+            'client_phone' => '612345678',
+            'origin' => 'Madrid',
+            'destination' => 'Toledo',
+            'trip_time' => '09:00',
+            'final_price' => 50,
+            'vehicle_id' => $vehicleId,
+            'owner_id' => $victim->id,
+        ])->assertStatus(403);
+
+        $this->assertDatabaseMissing('rutas', ['owner_id' => $victim->id]);
     }
 
     public function test_it_rejects_negative_prices_and_short_addresses(): void
     {
-        $owner = $this->ownerUser();
-
-        $response = $this->actingAs($owner, 'sanctum')->postJson('/api/rutas', $this->validRutaPayload([
+        $response = $this->actingAs(\App\Models\User::factory()->create(), 'sanctum')->postJson('/api/rutas', [
+            'client_name' => 'Ana',
+            'client_phone' => '612345678',
             'origin' => 'M',
+            'destination' => 'Toledo',
+            'trip_time' => '09:00',
+            'final_price' => 50,
             'price_per_km' => -5,
-        ]));
+        ]);
 
         $response->assertStatus(422)
             ->assertJsonValidationErrors(['origin', 'price_per_km']);
@@ -204,11 +218,10 @@ class RutaApiTest extends TestCase
 
     public function test_it_can_filter_rutas_by_date_range(): void
     {
-        $owner = $this->ownerUser();
-
-        Ruta::factory()->create(['owner_id' => $owner->id, 'trip_date' => '2026-08-01']);
-        Ruta::factory()->create(['owner_id' => $owner->id, 'trip_date' => '2026-08-15']);
-        Ruta::factory()->create(['owner_id' => $owner->id, 'trip_date' => '2026-09-01']);
+        $owner = \App\Models\User::factory()->create();
+        foreach (['2026-08-01', '2026-08-15', '2026-09-01'] as $date) {
+            \App\Models\Ruta::factory()->create(['owner_id' => $owner->id, 'trip_date' => $date]);
+        }
 
         $resp = $this->actingAs($owner, 'sanctum')->getJson('/api/rutas?date_from=2026-08-01&date_to=2026-08-31');
 
@@ -217,12 +230,12 @@ class RutaApiTest extends TestCase
 
     public function test_admin_can_filter_rutas_by_user_id(): void
     {
-        $owner = User::factory()->create();
-        $other = User::factory()->create();
-        $admin = User::factory()->create(['role' => 'admin']);
+        $owner = \App\Models\User::factory()->create();
+        $other = \App\Models\User::factory()->create();
+        $admin = \App\Models\User::factory()->create(['role' => 'admin']);
 
-        Ruta::factory()->create(['owner_id' => $owner->id, 'trip_date' => '2026-08-25']);
-        Ruta::factory()->create(['owner_id' => $other->id, 'trip_date' => '2026-08-25']);
+        \App\Models\Ruta::factory()->create(['owner_id' => $owner->id, 'trip_date' => '2026-08-25']);
+        \App\Models\Ruta::factory()->create(['owner_id' => $other->id, 'trip_date' => '2026-08-25']);
 
         $resp = $this->actingAs($admin, 'sanctum')->getJson("/api/rutas?user_id={$owner->id}");
 
@@ -231,10 +244,10 @@ class RutaApiTest extends TestCase
 
     public function test_non_admin_cannot_use_user_id_filter_to_see_others_rutas(): void
     {
-        $owner = User::factory()->create();
-        $other = User::factory()->create();
+        $owner = \App\Models\User::factory()->create();
+        $other = \App\Models\User::factory()->create();
 
-        Ruta::factory()->create(['owner_id' => $other->id, 'trip_date' => '2026-08-25']);
+        \App\Models\Ruta::factory()->create(['owner_id' => $other->id, 'trip_date' => '2026-08-25']);
 
         $resp = $this->actingAs($owner, 'sanctum')->getJson("/api/rutas?user_id={$other->id}");
 

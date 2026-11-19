@@ -9,38 +9,111 @@ class OwnerCodeTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_owner_creates_month_code_and_driver_joins()
+    public function test_owner_creates_month_code_and_driver_joins_and_creates_ruta()
     {
-        $resp = $this->postJson('/api/register', [
+        $ownerPayload = [
             'first_name' => 'Owner',
             'last_name' => 'Codes',
             'avatar' => 'http://example.com/a.png',
             'email' => 'ownercodes@example.test',
             'password' => 'Secret123!',
-        ]);
+        ];
+        $resp = $this->postJson('/api/register', $ownerPayload);
         $token = $resp->json('access_token');
+        $ownerId = $resp->json('user.id');
 
-        $this->withHeaders(['Authorization' => 'Bearer '.$token])->postJson('/api/vehicles', ['plate' => 'CODE-001'])->assertStatus(201);
+        // Owner mode only activates once the user has a vehicle.
+        $vehicle = $this->withHeaders(['Authorization' => 'Bearer ' . $token])->postJson('/api/vehicles', ['make' => 'Seat', 'model' => 'Ibiza', 'color' => 'Blanco', 'year' => 2020, 'seats' => 5, 'plate' => 'CODE-001', 'vehicle_type' => 'sedan']);
+        $vehicle->assertStatus(201);
 
         $month = date('Y-m');
-        $create = $this->withHeaders(['Authorization' => 'Bearer '.$token])->postJson('/api/owner/codes', ['month' => $month]);
-        $create->assertStatus(201)->assertJsonStructure(['id', 'owner_id', 'code', 'month']);
+        $create = $this->withHeaders(['Authorization' => 'Bearer ' . $token])->postJson('/api/owner/codes', ['month' => $month]);
+        $create->assertStatus(201)->assertJsonStructure(['id','owner_id','code','month','type','valid_on'])
+            ->assertJsonPath('type', 'month');
         $code = $create->json('code');
 
-        $dreg = $this->postJson('/api/register', [
+        // register driver
+        $driverPayload = [
             'first_name' => 'Driver',
             'last_name' => 'Codes',
             'avatar' => 'http://example.com/b.png',
             'email' => 'drivercodes@example.test',
             'password' => 'Secret123!',
-        ]);
+        ];
+        $dreg = $this->postJson('/api/register', $driverPayload);
         $dtoken = $dreg->json('access_token');
 
+        // Sanctum's RequestGuard caches the first-resolved user for the
+        // lifetime of the test's container, so switching bearer tokens
+        // between users within one test requires forgetting guards first.
         $this->app['auth']->forgetGuards();
-        $this->withHeaders(['Authorization' => 'Bearer '.$dtoken])
-            ->postJson('/api/driver/join-code', ['code' => $code, 'month' => $month])
-            ->assertStatus(200)
-            ->assertJson(['message' => 'Joined']);
+
+        $join = $this->withHeaders(['Authorization' => 'Bearer ' . $dtoken])->postJson('/api/driver/join-code', ['code' => $code, 'month' => $month]);
+        $join->assertStatus(200)->assertJson(['message' => 'Joined']);
+
+        $this->app['auth']->forgetGuards();
+
+        // Driving for the owner they just joined creates a ruta attributed to that owner.
+        $ruta = $this->withHeaders(['Authorization' => 'Bearer ' . $dtoken])->postJson('/api/rutas', [
+            'client_name' => 'Cliente', 'client_phone' => '612345678', 'final_price' => 20, 'trip_time' => '10:00',
+            'origin' => 'Origen A',
+            'destination' => 'Destino B',
+            'trip_date' => date('Y-m-d'),
+            'owner_id' => $ownerId,
+        ]);
+        $ruta->assertStatus(201)
+            ->assertJsonPath('owner_id', $ownerId)
+            ->assertJsonPath('driver_id', $dreg->json('user.id'));
+    }
+
+    public function test_driver_can_delete_a_ruta_they_created_but_not_one_the_owner_assigned_them()
+    {
+        $ownerPayload = [
+            'first_name' => 'Owner', 'last_name' => 'Del',
+            'email' => 'ownerdel2@example.test', 'password' => 'Secret123!',
+        ];
+        $oreg = $this->postJson('/api/register', $ownerPayload);
+        $otoken = $oreg->json('access_token');
+        $ownerId = $oreg->json('user.id');
+
+        $vehicleId = $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])->postJson('/api/vehicles', ['make' => 'Seat', 'model' => 'Ibiza', 'color' => 'Blanco', 'year' => 2020, 'seats' => 5, 'plate' => 'DELX-001', 'vehicle_type' => 'sedan'])->assertStatus(201)->json('id');
+        $month = date('Y-m');
+        $code = $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])->postJson('/api/owner/codes', ['month' => $month])->json('code');
+
+        $dreg = $this->postJson('/api/register', [
+            'first_name' => 'Driver', 'last_name' => 'Del',
+            'email' => 'driverdel2@example.test', 'password' => 'Secret123!',
+        ]);
+        $dtoken = $dreg->json('access_token');
+        $driverId = $dreg->json('user.id');
+
+        $this->app['auth']->forgetGuards();
+        $this->withHeaders(['Authorization' => 'Bearer ' . $dtoken])->postJson('/api/driver/join-code', ['code' => $code, 'month' => $month])->assertStatus(200);
+
+        $this->app['auth']->forgetGuards();
+        // Ruta the driver creates themselves while driving for the owner.
+        $ownRuta = $this->withHeaders(['Authorization' => 'Bearer ' . $dtoken])->postJson('/api/rutas', [
+            'client_name' => 'Cliente', 'client_phone' => '612345678', 'final_price' => 20, 'trip_time' => '10:00', 'origin' => 'Origen', 'destination' => 'Destino', 'owner_id' => $ownerId,
+        ]);
+        $ownRuta->assertStatus(201);
+
+        $this->app['auth']->forgetGuards();
+        // Ruta the owner creates and assigns to the driver directly.
+        $assignedRuta = $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])->postJson('/api/rutas', [
+            'client_name' => 'Cliente 2', 'client_phone' => '612345678', 'final_price' => 20, 'trip_time' => '10:00', 'origin' => 'Origen', 'destination' => 'Destino',
+            'driver_id' => $driverId, 'vehicle_id' => $vehicleId,
+        ]);
+        $assignedRuta->assertStatus(201);
+
+        $this->app['auth']->forgetGuards();
+        $this->withHeaders(['Authorization' => 'Bearer ' . $dtoken])
+            ->deleteJson('/api/rutas/' . $ownRuta->json('id'))
+            ->assertStatus(200);
+
+        $this->app['auth']->forgetGuards();
+        $this->withHeaders(['Authorization' => 'Bearer ' . $dtoken])
+            ->deleteJson('/api/rutas/' . $assignedRuta->json('id'))
+            ->assertStatus(403);
     }
 
     public function test_owner_code_rejects_invalid_month_format()
@@ -50,9 +123,9 @@ class OwnerCodeTest extends TestCase
             'email' => 'ownerbad@example.test', 'password' => 'Secret123!',
         ]);
         $token = $resp->json('access_token');
-        $this->withHeaders(['Authorization' => 'Bearer '.$token])->postJson('/api/vehicles', ['plate' => 'BAD-001'])->assertStatus(201);
+        $this->withHeaders(['Authorization' => 'Bearer ' . $token])->postJson('/api/vehicles', ['make' => 'Seat', 'model' => 'Ibiza', 'color' => 'Blanco', 'year' => 2020, 'seats' => 5, 'plate' => 'BAD-001', 'vehicle_type' => 'sedan'])->assertStatus(201);
 
-        $create = $this->withHeaders(['Authorization' => 'Bearer '.$token])->postJson('/api/owner/codes', ['month' => 'not-a-month']);
+        $create = $this->withHeaders(['Authorization' => 'Bearer ' . $token])->postJson('/api/owner/codes', ['month' => 'not-a-month']);
         $create->assertStatus(422)->assertJsonValidationErrors(['month']);
     }
 
@@ -64,8 +137,140 @@ class OwnerCodeTest extends TestCase
         ]);
         $token = $resp->json('access_token');
 
-        $join = $this->withHeaders(['Authorization' => 'Bearer '.$token])
+        $join = $this->withHeaders(['Authorization' => 'Bearer ' . $token])
             ->postJson('/api/driver/join-code', ['code' => 'short', 'month' => date('Y-m')]);
         $join->assertStatus(422)->assertJsonValidationErrors(['code']);
+    }
+
+    public function test_owner_creates_day_code_and_driver_joins_today()
+    {
+        $oreg = $this->postJson('/api/register', [
+            'first_name' => 'Owner', 'last_name' => 'Day',
+            'email' => 'ownerday@example.test', 'password' => 'Secret123!',
+        ]);
+        $otoken = $oreg->json('access_token');
+        $ownerId = $oreg->json('user.id');
+
+        $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])->postJson('/api/vehicles', [
+            'make' => 'Seat', 'model' => 'Leon', 'color' => 'Negro', 'year' => 2021,
+            'seats' => 5, 'plate' => 'DAY-001', 'vehicle_type' => 'sedan',
+        ])->assertStatus(201);
+
+        $today = date('Y-m-d');
+        $create = $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])
+            ->postJson('/api/owner/codes', ['type' => 'day', 'valid_on' => $today]);
+        $create->assertStatus(201)
+            ->assertJsonPath('type', 'day')
+            ->assertJsonPath('valid_on', $today)
+            ->assertJsonPath('month', date('Y-m'));
+        $code = $create->json('code');
+
+        $dreg = $this->postJson('/api/register', [
+            'first_name' => 'Driver', 'last_name' => 'Day',
+            'email' => 'driverday@example.test', 'password' => 'Secret123!',
+        ]);
+        $dtoken = $dreg->json('access_token');
+
+        $this->app['auth']->forgetGuards();
+        $this->withHeaders(['Authorization' => 'Bearer ' . $dtoken])
+            ->postJson('/api/driver/join-code', ['code' => $code])
+            ->assertStatus(200)
+            ->assertJson(['message' => 'Joined']);
+
+        $this->app['auth']->forgetGuards();
+        $this->withHeaders(['Authorization' => 'Bearer ' . $dtoken])->postJson('/api/rutas', [
+            'client_name' => 'Cliente día', 'client_phone' => '612345678', 'final_price' => 20, 'trip_time' => '10:00',
+            'origin' => 'Origen',
+            'destination' => 'Destino',
+            'trip_date' => $today,
+            'owner_id' => $ownerId,
+        ])->assertStatus(201)->assertJsonPath('owner_id', $ownerId);
+    }
+
+    public function test_driver_cannot_join_day_code_on_wrong_day()
+    {
+        $oreg = $this->postJson('/api/register', [
+            'first_name' => 'Owner', 'last_name' => 'Past',
+            'email' => 'ownerpastday@example.test', 'password' => 'Secret123!',
+        ]);
+        $otoken = $oreg->json('access_token');
+
+        $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])->postJson('/api/vehicles', [
+            'make' => 'Seat', 'model' => 'Leon', 'color' => 'Rojo', 'year' => 2021,
+            'seats' => 5, 'plate' => 'PAST-001', 'vehicle_type' => 'sedan',
+        ])->assertStatus(201);
+
+        $yesterday = date('Y-m-d', strtotime('-1 day'));
+        $code = $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])
+            ->postJson('/api/owner/codes', ['type' => 'day', 'valid_on' => $yesterday])
+            ->json('code');
+
+        $dreg = $this->postJson('/api/register', [
+            'first_name' => 'Driver', 'last_name' => 'Past',
+            'email' => 'driverpastday@example.test', 'password' => 'Secret123!',
+        ]);
+        $dtoken = $dreg->json('access_token');
+
+        $this->app['auth']->forgetGuards();
+        $this->withHeaders(['Authorization' => 'Bearer ' . $dtoken])
+            ->postJson('/api/driver/join-code', ['code' => $code])
+            ->assertStatus(422);
+    }
+
+    public function test_owner_cannot_create_two_day_codes_for_same_date()
+    {
+        $oreg = $this->postJson('/api/register', [
+            'first_name' => 'Owner', 'last_name' => 'UniqueDay',
+            'email' => 'owneruniqueday@example.test', 'password' => 'Secret123!',
+        ]);
+        $otoken = $oreg->json('access_token');
+
+        $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])->postJson('/api/vehicles', [
+            'make' => 'Seat', 'model' => 'Leon', 'color' => 'Azul', 'year' => 2021,
+            'seats' => 5, 'plate' => 'UNIQ-001', 'vehicle_type' => 'sedan',
+        ])->assertStatus(201);
+
+        $day = '2026-04-10';
+        $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])
+            ->postJson('/api/owner/codes', ['type' => 'day', 'valid_on' => $day])
+            ->assertStatus(201);
+
+        $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])
+            ->postJson('/api/owner/codes', ['type' => 'day', 'valid_on' => $day])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['valid_on']);
+
+        // A different day is still allowed.
+        $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])
+            ->postJson('/api/owner/codes', ['type' => 'day', 'valid_on' => '2026-04-11'])
+            ->assertStatus(201);
+    }
+
+    public function test_owner_cannot_create_two_month_codes_for_same_month()
+    {
+        $oreg = $this->postJson('/api/register', [
+            'first_name' => 'Owner', 'last_name' => 'UniqueMonth',
+            'email' => 'owneruniquemonth@example.test', 'password' => 'Secret123!',
+        ]);
+        $otoken = $oreg->json('access_token');
+
+        $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])->postJson('/api/vehicles', [
+            'make' => 'Seat', 'model' => 'Leon', 'color' => 'Verde', 'year' => 2021,
+            'seats' => 5, 'plate' => 'UNIQ-002', 'vehicle_type' => 'sedan',
+        ])->assertStatus(201);
+
+        $month = '2026-05';
+        $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])
+            ->postJson('/api/owner/codes', ['type' => 'month', 'month' => $month])
+            ->assertStatus(201);
+
+        $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])
+            ->postJson('/api/owner/codes', ['type' => 'month', 'month' => $month])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['month']);
+
+        $this->withHeaders(['Authorization' => 'Bearer ' . $otoken])
+            ->postJson('/api/owner/codes', ['type' => 'month', 'month' => '2026-06'])
+            ->assertStatus(201);
     }
 }

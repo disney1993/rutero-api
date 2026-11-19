@@ -2,15 +2,22 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Jornada;
 use App\Models\Ruta;
-use App\Models\Vehicle;
+use App\Models\User;
+use App\Services\RutaAutoCompleter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
 
 class RutaController extends Controller
 {
+    /** Attribution users for list/edit meta (names + avatar tint). */
+    private const ATTRIBUTION_WITH = [
+        'completer:id,first_name,last_name,avatar_color',
+        'creator:id,first_name,last_name,avatar_color',
+        'canceller:id,first_name,last_name,avatar_color',
+        'completions.user:id,first_name,last_name,avatar_color',
+    ];
+
     public function index(Request $request): JsonResponse
     {
         $request->validate([
@@ -19,29 +26,37 @@ class RutaController extends Controller
             'date_from' => 'sometimes|date',
             'date_to' => 'sometimes|date|after_or_equal:date_from',
             'user_id' => 'sometimes|integer',
-            'jornada_id' => 'sometimes|integer|exists:jornadas,id',
+            'search' => 'sometimes|string|max:255',
+            'needs_review' => 'sometimes|boolean',
+            'with_deleted' => 'sometimes|boolean',
         ]);
 
         $user = $request->user();
-        $query = Ruta::query();
+        $query = Ruta::query()->with(self::ATTRIBUTION_WITH);
+
+        // Los listados piden también los eliminados (se muestran atenuados y se
+        // pueden restaurar); calendarios, informes, etc. no los ven.
+        if ($request->boolean('with_deleted')) {
+            $query->withTrashed();
+        }
 
         // Authorization: admin sees all, everyone else sees rutas they own or drive.
-        if (! $user->isAdmin()) {
+        if ($user && ! $user->isAdmin()) {
             $query->where(function ($q) use ($user) {
                 $q->where('owner_id', $user->id)->orWhere('driver_id', $user->id);
             });
         }
 
         if ($request->filled('status')) {
+            // Cancelado = borrado blando: sin withTrashed no aparecería ninguno.
+            if ($request->status === 'cancelled') {
+                $query->withTrashed();
+            }
             $query->where('status', $request->status);
         }
 
-        if ($request->filled('jornada_id')) {
-            $query->where('jornada_id', $request->integer('jornada_id'));
-        }
-
         // Only admin may look up another user's rutas by id.
-        if ($user->isAdmin() && $request->filled('user_id')) {
+        if ($user && $user->isAdmin() && $request->filled('user_id')) {
             $lookupId = $request->integer('user_id');
             $query->where(function ($q) use ($lookupId) {
                 $q->where('owner_id', $lookupId)->orWhere('driver_id', $lookupId);
@@ -49,7 +64,7 @@ class RutaController extends Controller
         }
 
         // Hide rutas marked hidden from anyone who isn't the owner (or admin).
-        if (! $user->isAdmin()) {
+        if ($user && ! $user->isAdmin()) {
             $query->where(function ($q) use ($user) {
                 $q->where('hidden', false)->orWhere('owner_id', $user->id);
             });
@@ -61,7 +76,19 @@ class RutaController extends Controller
             $query->whereBetween('trip_date', [$request->date_from, $request->date_to]);
         }
 
+        // Búsqueda por nombre de cliente, p.ej. para encontrar una ruta
+        // concreta desde "Jornada" sin navegar día a día.
+        if ($request->filled('search')) {
+            $query->where('client_name', 'like', '%' . $request->input('search') . '%');
+        }
+
+        // Cerradas automáticamente y aún sin revisar (lista "Por revisar").
+        if ($request->boolean('needs_review')) {
+            $query->where('auto_completed', true)->whereNull('reviewed_at');
+        }
+
         $rutas = $query->orderBy('trip_date', 'desc')->orderBy('trip_time', 'asc')->get();
+        $this->attachAutoCompleteEta($rutas);
 
         return response()->json([
             'data' => $rutas,
@@ -80,104 +107,96 @@ class RutaController extends Controller
             'destination' => 'required|string|min:2|max:255',
             'destination_lat' => 'nullable|numeric|between:-90,90',
             'destination_lng' => 'nullable|numeric|between:-180,180',
-            'vehicle_id' => ['nullable', 'integer', Rule::exists('vehicles', 'id')->whereNull('deleted_at')],
-            'jornada_id' => ['nullable', 'integer', Rule::exists('jornadas', 'id')->whereNull('deleted_at')],
+            'vehicle_id' => 'nullable|integer|exists:vehicles,id',
             'estimated_distance_km' => 'nullable|numeric|min:0|max:100000',
-            'estimated_duration_min' => 'nullable|integer|min:1|max:10080',
+            'estimated_duration_min' => 'nullable|integer|min:0|max:6000',
             'price_per_km' => 'nullable|numeric|min:0|max:100000',
             'estimated_price' => 'nullable|numeric|min:0|max:1000000',
             'final_price' => 'required|numeric|min:0|max:1000000',
-            'payment_method' => 'nullable|string|in:efectivo,tarjeta,bizum',
+            'payment_method' => 'nullable|string|max:50',
             'passenger_count' => 'nullable|integer|min:1|max:20',
-            'trip_date' => 'required|date',
+            'trip_date' => 'nullable|date',
             'trip_time' => 'required|date_format:H:i',
-            'status' => 'nullable|in:pending,completed,cancelled',
+            // Cancelar = eliminar (borrado blando, ver destroy): no es un estado editable.
+            // En creación el estado siempre es pending (se fuerza abajo).
+            'status' => 'nullable|in:pending,completed',
             'hidden' => 'nullable|boolean',
             'notes' => 'nullable|string|max:2000',
             'owner_id' => 'nullable|integer|exists:users,id',
             'driver_id' => 'nullable|integer|exists:users,id',
         ]);
 
-        if (empty($validated['estimated_price']) && ! empty($validated['estimated_distance_km']) && ! empty($validated['price_per_km'])) {
+        if (empty($validated['estimated_price']) && !empty($validated['estimated_distance_km']) && !empty($validated['price_per_km'])) {
             $validated['estimated_price'] = round((float) $validated['estimated_distance_km'] * (float) $validated['price_per_km'], 2);
         }
 
-        $validated['estimated_duration_min'] = $this->resolveDurationMin(
-            $validated['estimated_duration_min'] ?? null,
-            $validated['estimated_distance_km'] ?? null,
-        );
-
-        $validated['status'] ??= 'pending';
+        // Las rutas nuevas siempre nacen pendientes; el cliente no elige estado al crear.
+        $validated['status'] = 'pending';
+        $validated['passenger_count'] = $validated['passenger_count'] ?? 1;
 
         $user = $request->user();
+
+        // owner_id/driver_id are never trusted as-is: an anonymous caller must
+        // not be able to attribute a ruta to an arbitrary user's account.
         $requestedOwnerId = $validated['owner_id'] ?? null;
         $requestedDriverId = $validated['driver_id'] ?? null;
-        $jornadaId = $validated['jornada_id'] ?? null;
         unset($validated['owner_id'], $validated['driver_id']);
 
-        $jornada = null;
+        $drivingForAnotherOwner = false;
 
-        if ($user->isAdmin()) {
-            $validated['owner_id'] = $requestedOwnerId ?: $user->id;
-            if ($requestedDriverId) {
-                $validated['driver_id'] = $requestedDriverId;
-            }
-            if ($jornadaId) {
-                $jornada = Jornada::find($jornadaId);
-                $validated['jornada_id'] = $jornada?->id;
-                if ($jornada && empty($validated['trip_date'])) {
-                    $validated['trip_date'] = $jornada->date->toDateString();
+        if ($user) {
+            if ($user->isAdmin()) {
+                // Admin creates on behalf of whichever owner (and optionally driver) is given.
+                $validated['owner_id'] = $requestedOwnerId ?: $user->id;
+                if ($requestedDriverId) {
+                    $validated['driver_id'] = $requestedDriverId;
                 }
-            }
-        } elseif ($jornadaId || ($requestedOwnerId && $requestedOwnerId !== $user->id)) {
-            $jornada = $this->resolveDriverJornada($user->id, $jornadaId, $requestedOwnerId, $validated['trip_date'] ?? null);
-            if (! $jornada) {
-                return response()->json(['message' => 'Debes unirte a una jornada válida para este día'], 403);
-            }
-            if (! $jornada->allow_create) {
-                return response()->json(['message' => 'Esta jornada no permite crear viajes'], 403);
-            }
+            } elseif ($requestedOwnerId && $requestedOwnerId !== $user->id) {
+                // Conducir para otro propietario: código de mes (mes actual) o de jornada (día del viaje).
+                $tripDate = isset($validated['trip_date'])
+                    ? substr((string) $validated['trip_date'], 0, 10)
+                    : now()->toDateString();
+                $isDriverForOwner = \App\Models\OwnerMonthCode::where('owner_id', $requestedOwnerId)
+                    ->whereHas('driverEntries', fn ($q) => $q->where('driver_id', $user->id))
+                    ->get()
+                    ->contains(fn ($code) => $code->authorizesDate($tripDate));
 
-            $validated['owner_id'] = $jornada->owner_id;
-            $validated['driver_id'] = $user->id;
-            $validated['jornada_id'] = $jornada->id;
-            $validated['trip_date'] = $jornada->date->toDateString();
-        } else {
-            if (! $user->hasOwnerCapability()) {
-                return response()->json(['message' => 'Necesitas al menos un vehículo para crear rutas'], 403);
-            }
-            $validated['owner_id'] = $user->id;
-
-            if ($jornadaId) {
-                $jornada = Jornada::where('id', $jornadaId)->where('owner_id', $user->id)->first();
-                if (! $jornada) {
-                    return response()->json(['message' => 'Jornada no encontrada'], 422);
+                if (! $isDriverForOwner) {
+                    return response()->json(['message' => 'No estás unido al código de este propietario para esta fecha'], 403);
                 }
-                $validated['jornada_id'] = $jornada->id;
-                $validated['trip_date'] = $validated['trip_date'] ?? $jornada->date->toDateString();
+
+                $drivingForAnotherOwner = true;
+                $validated['owner_id'] = $requestedOwnerId;
+                $validated['driver_id'] = $user->id;
+            } else {
+                // Creating a ruta for their own fleet.
+                if (! $user->hasOwnerCapability()) {
+                    return response()->json(['message' => 'Necesitas al menos un vehículo para crear rutas'], 403);
+                }
+                $validated['owner_id'] = $user->id;
             }
         }
 
-        // Default vehicle: owner's default when none provided.
-        if (empty($validated['vehicle_id'])) {
-            $defaultVehicle = Vehicle::where('owner_id', $validated['owner_id'])
-                ->where('is_default', true)
-                ->first()
-                ?? Vehicle::where('owner_id', $validated['owner_id'])->orderBy('id')->first();
-            if ($defaultVehicle) {
-                $validated['vehicle_id'] = $defaultVehicle->id;
-            }
-        } else {
-            $vehicle = Vehicle::find($validated['vehicle_id']);
+        // El vehículo es obligatorio, salvo cuando quien crea la ruta conduce
+        // para un propietario ajeno (código de mes): no tiene visibilidad de
+        // esa flota, así que no se le puede exigir elegir uno.
+        if (empty($validated['vehicle_id']) && ! $drivingForAnotherOwner) {
+            return response()->json(['message' => 'Selecciona un vehículo'], 422);
+        }
+
+        // If vehicle_id provided, ensure it belongs to the resolved owner's fleet.
+        if (!empty($validated['vehicle_id'])) {
+            $vehicle = \App\Models\Vehicle::find($validated['vehicle_id']);
             if (! $vehicle) {
                 return response()->json(['message' => 'Vehicle not found'], 422);
             }
-            if ($vehicle->owner_id !== $validated['owner_id']) {
+            if (isset($validated['owner_id']) && $vehicle->owner_id !== $validated['owner_id']) {
                 return response()->json(['message' => 'Vehicle does not belong to this owner'], 403);
             }
         }
 
-        if (! $user->isAdmin()) {
+        // Enforce the free-plan ruta limit on the resolved owner (admins bypass it).
+        if (isset($validated['owner_id']) && (! $user || ! $user->isAdmin())) {
             $ownerUser = \App\Models\User::find($validated['owner_id']);
             if ($ownerUser && ! $ownerUser->isPremium()) {
                 $limit = config('rutero.free_owner_ruta_limit');
@@ -190,10 +209,13 @@ class RutaController extends Controller
             }
         }
 
+        // default hidden false
         $validated['hidden'] = $validated['hidden'] ?? false;
-        $validated['created_by'] = $user->id;
+        $validated['created_by'] = $user?->id;
 
         $ruta = Ruta::create($validated);
+        $ruta->load(self::ATTRIBUTION_WITH);
+        $this->attachAutoCompleteEta(collect([$ruta]));
 
         return response()->json($ruta, 201);
     }
@@ -201,155 +223,179 @@ class RutaController extends Controller
     public function show(Request $request, Ruta $ruta): JsonResponse
     {
         $user = $request->user();
-        if (! $user->isAdmin() && $ruta->owner_id !== $user->id && $ruta->driver_id !== $user->id) {
+        if ($user && ! $user->isAdmin() && $ruta->owner_id !== $user->id && $ruta->driver_id !== $user->id) {
             return response()->json([], 403);
         }
+
+        $ruta->load(self::ATTRIBUTION_WITH);
+        $this->attachAutoCompleteEta(collect([$ruta]));
 
         return response()->json($ruta);
     }
 
     public function update(Request $request, Ruta $ruta): JsonResponse
     {
+        // Owner/full form: if phone/time/final_price are sent they must be present
+        // and valid. Drivers keep a limited field set (below) so partial updates
+        // (status/payment only) are not forced to send those keys.
         $validated = $request->validate([
-            'client_name' => 'sometimes|required|string|min:2|max:255',
+            'client_name' => 'sometimes|string|min:2|max:255',
             'client_phone' => ['sometimes', 'required', 'string', 'regex:/^[0-9+\-\s()]{6,20}$/'],
-            'origin' => 'sometimes|required|string|min:2|max:255',
+            'origin' => 'sometimes|string|min:2|max:255',
             'origin_lat' => 'sometimes|nullable|numeric|between:-90,90',
             'origin_lng' => 'sometimes|nullable|numeric|between:-180,180',
-            'destination' => 'sometimes|required|string|min:2|max:255',
+            'destination' => 'sometimes|string|min:2|max:255',
             'destination_lat' => 'sometimes|nullable|numeric|between:-90,90',
             'destination_lng' => 'sometimes|nullable|numeric|between:-180,180',
-            'vehicle_id' => ['sometimes', 'nullable', 'integer', Rule::exists('vehicles', 'id')->whereNull('deleted_at')],
             'estimated_distance_km' => 'sometimes|nullable|numeric|min:0|max:100000',
-            'estimated_duration_min' => 'sometimes|nullable|integer|min:1|max:10080',
+            'estimated_duration_min' => 'sometimes|nullable|integer|min:0|max:6000',
             'price_per_km' => 'sometimes|nullable|numeric|min:0|max:100000',
             'estimated_price' => 'sometimes|nullable|numeric|min:0|max:1000000',
             'final_price' => 'sometimes|required|numeric|min:0|max:1000000',
-            'payment_method' => 'sometimes|nullable|string|in:efectivo,tarjeta,bizum',
+            'payment_method' => 'sometimes|nullable|string|max:50',
             'passenger_count' => 'sometimes|nullable|integer|min:1|max:20',
-            'trip_date' => 'sometimes|required|date',
+            'trip_date' => 'sometimes|nullable|date',
             'trip_time' => 'sometimes|required|date_format:H:i',
-            'status' => 'sometimes|in:pending,completed,cancelled',
+            'status' => 'sometimes|in:pending,completed',
             'notes' => 'sometimes|nullable|string|max:2000',
         ]);
 
-        if (empty($validated['estimated_price']) && ! empty($ruta->estimated_distance_km) && ! empty($ruta->price_per_km)) {
+        if (empty($validated['estimated_price']) && !empty($ruta->estimated_distance_km) && !empty($ruta->price_per_km)) {
             $validated['estimated_price'] = round((float) $ruta->estimated_distance_km * (float) $ruta->price_per_km, 2);
         }
 
-        if (array_key_exists('estimated_duration_min', $validated) || array_key_exists('estimated_distance_km', $validated)) {
-            $validated['estimated_duration_min'] = $this->resolveDurationMin(
-                $validated['estimated_duration_min'] ?? $ruta->estimated_duration_min,
-                $validated['estimated_distance_km'] ?? $ruta->estimated_distance_km,
-            );
-        }
-
         $user = $request->user();
-        $isOwner = $user->isAdmin() || $ruta->owner_id === $user->id;
-        $isDriver = $ruta->driver_id === $user->id;
 
-        if (! $isOwner && ! $isDriver) {
+        $isOwner = $user && ($user->isAdmin() || $ruta->owner_id === $user->id);
+        if (! $isOwner && (! $user || $ruta->driver_id !== $user->id)) {
             return response()->json([], 403);
         }
 
+        // Whoever isn't the owner (typically the assigned driver) can only update a limited set of fields.
         if (! $isOwner) {
-            $jornada = $ruta->jornada_id ? Jornada::find($ruta->jornada_id) : null;
-            if ($jornada && ! $jornada->allow_edit) {
-                return response()->json(['message' => 'Esta jornada no permite editar viajes'], 403);
-            }
-
-            $allowed = ['final_price', 'payment_method', 'status', 'notes', 'vehicle_id'];
+            $allowed = ['final_price', 'payment_method', 'status', 'notes'];
             $validated = array_intersect_key($validated, array_flip($allowed));
+            if (isset($validated['status']) && !in_array($validated['status'], ['completed', 'pending'])) {
+                unset($validated['status']);
+            }
         }
 
-        if (isset($validated['vehicle_id'])) {
-            $vehicle = Vehicle::find($validated['vehicle_id']);
-            if (! $vehicle || $vehicle->owner_id !== $ruta->owner_id) {
-                return response()->json(['message' => 'Vehicle does not belong to this owner'], 403);
+        // Completar (incl. swipe): cada conductor que marca "completed" se
+        // registra en ruta_completions sin borrar las marcas de los demás.
+        // completed_by queda como el último que lo marcó (compatibilidad).
+        $markingCompleted = $user && ($validated['status'] ?? null) === 'completed';
+        if ($markingCompleted) {
+            $validated['completed_by'] = $user->id;
+            // Same default as auto-complete / right-swipe: cash when completing with no payment set.
+            $nextPayment = array_key_exists('payment_method', $validated)
+                ? $validated['payment_method']
+                : $ruta->payment_method;
+            if (empty($nextPayment)) {
+                $validated['payment_method'] = 'efectivo';
             }
+        }
+
+        // Cualquier edición de una ruta cerrada automáticamente cuenta como
+        // revisión. Volver a "pendiente" deshace el cierre automático; se
+        // conserva auto_completed_at para que el cron no la vuelva a cerrar.
+        if ($ruta->auto_completed) {
+            $validated['reviewed_at'] = now();
+            if (($validated['status'] ?? null) === 'pending') {
+                $validated['auto_completed'] = false;
+            }
+        }
+
+        // Si cambia la fecha u hora de una ruta pendiente, el cierre
+        // automático se vuelve a programar para el nuevo horario.
+        $dateChanged = array_key_exists('trip_date', $validated)
+            && $validated['trip_date'] !== $ruta->trip_date?->format('Y-m-d');
+        $timeChanged = array_key_exists('trip_time', $validated) && $validated['trip_time'] !== $ruta->trip_time;
+        if (($dateChanged || $timeChanged) && ($validated['status'] ?? $ruta->status) === 'pending') {
+            $validated['auto_completed'] = false;
+            $validated['auto_completed_at'] = null;
         }
 
         $ruta->update($validated);
 
+        if ($markingCompleted) {
+            $ruta->recordCompletion($user->id);
+        }
+
+        $ruta->load(self::ATTRIBUTION_WITH);
+        $this->attachAutoCompleteEta(collect([$ruta]));
+
         return response()->json($ruta);
+    }
+
+    // "Correcto": marca como revisado un cierre automático sin cambiar nada.
+    public function review(Request $request, Ruta $ruta): JsonResponse
+    {
+        $user = $request->user();
+        $allowed = $user->isAdmin() || $ruta->owner_id === $user->id || $ruta->driver_id === $user->id;
+        if (! $allowed) {
+            return response()->json([], 403);
+        }
+
+        if ($ruta->auto_completed && ! $ruta->reviewed_at) {
+            $ruta->update(['reviewed_at' => now()]);
+        }
+
+        return response()->json($ruta);
+    }
+
+    /**
+     * Añade auto_complete_eta: hora local ("Y-m-d\TH:i") a partir de la cual el
+     * cron cerrará la ruta si el siguiente viaje no lo adelanta. La app la usa
+     * para avisar al usuario de que el viaje se completará solo.
+     */
+    private function attachAutoCompleteEta($rutas): void
+    {
+        $completer = app(RutaAutoCompleter::class);
+        $owners = User::whereIn('id', $rutas->pluck('owner_id')->filter()->unique())->get()->keyBy('id');
+
+        foreach ($rutas as $ruta) {
+            $ruta->setAttribute('auto_complete_eta', $completer->etaFor($ruta, $owners->get($ruta->owner_id)));
+        }
     }
 
     public function destroy(Request $request, Ruta $ruta): JsonResponse
     {
         $user = $request->user();
-        $isOwner = $user->isAdmin() || $ruta->owner_id === $user->id;
-        $isDriver = $ruta->driver_id === $user->id;
+        $isOwner = $user && ($user->isAdmin() || $ruta->owner_id === $user->id);
+        $isCreatorDriver = $user && $ruta->driver_id === $user->id && $ruta->created_by === $user->id;
 
-        if ($isOwner) {
-            $ruta->delete();
-
-            return response()->json(['message' => 'Ruta eliminada correctamente']);
+        if (! $isOwner && ! $isCreatorDriver) {
+            return response()->json(['message' => 'Forbidden'], 403);
         }
 
-        if ($isDriver) {
-            $jornada = $ruta->jornada_id ? Jornada::find($ruta->jornada_id) : null;
-            if (! $jornada || ! $jornada->allow_delete) {
-                return response()->json(['message' => 'Esta jornada no permite eliminar viajes'], 403);
-            }
-            if ($ruta->created_by !== $user->id) {
-                return response()->json(['message' => 'Solo puedes eliminar viajes que creaste'], 403);
-            }
+        // Cancelar y eliminar son lo mismo: queda como "cancelled" y con borrado
+        // blando (sigue en los listados, tachado, y se puede deshacer con restore()).
+        $ruta->status = 'cancelled';
+        $ruta->cancelled_by = $user->id;
+        $ruta->save();
+        $ruta->delete();
 
-            $ruta->delete();
-
-            return response()->json(['message' => 'Ruta eliminada correctamente']);
-        }
-
-        return response()->json(['message' => 'Forbidden'], 403);
+        return response()->json(['message' => 'Ruta eliminada correctamente']);
     }
 
-    private function resolveDriverJornada(int $driverId, ?int $jornadaId, ?int $ownerId, ?string $tripDate): ?Jornada
+    // Recupera un viaje eliminado (mismos permisos que para eliminarlo).
+    public function restore(Request $request, Ruta $ruta): JsonResponse
     {
-        if ($jornadaId) {
-            $jornada = Jornada::find($jornadaId);
-            if (! $jornada || ! $jornada->hasDriver($driverId)) {
-                return null;
-            }
-            if ($ownerId && $jornada->owner_id !== $ownerId) {
-                return null;
-            }
+        $user = $request->user();
+        $isOwner = $user && ($user->isAdmin() || $ruta->owner_id === $user->id);
+        $isCreatorDriver = $user && $ruta->driver_id === $user->id && $ruta->created_by === $user->id;
 
-            return $jornada;
+        if (! $isOwner && ! $isCreatorDriver) {
+            return response()->json(['message' => 'Forbidden'], 403);
         }
 
-        if (! $ownerId) {
-            return null;
+        if ($ruta->trashed()) {
+            $ruta->restore();
+            $ruta->status = 'pending';
+            $ruta->cancelled_by = null;
+            $ruta->save();
         }
 
-        $query = Jornada::where('owner_id', $ownerId)
-            ->whereHas('driverEntries', fn ($q) => $q->where('driver_id', $driverId));
-
-        if ($tripDate) {
-            $query->whereDate('date', $tripDate);
-        } else {
-            $query->whereDate('date', now()->toDateString());
-        }
-
-        $matches = $query->orderBy('label')->get();
-        if ($matches->count() === 1) {
-            return $matches->first();
-        }
-
-        // Ambiguous (0 or 2+) — client must send jornada_id.
-        return null;
-    }
-
-    /** Always at least 15 minutes; prefers provided duration, else distance @ ~40 km/h. */
-    private function resolveDurationMin(mixed $durationMin, mixed $distanceKm): int
-    {
-        $minFloor = 15;
-        if ($durationMin !== null && $durationMin !== '' && (int) $durationMin > 0) {
-            return max($minFloor, (int) $durationMin);
-        }
-        if ($distanceKm !== null && $distanceKm !== '' && (float) $distanceKm > 0) {
-            return max($minFloor, (int) round(((float) $distanceKm / 40) * 60));
-        }
-
-        return $minFloor;
+        return response()->json($ruta->fresh());
     }
 }

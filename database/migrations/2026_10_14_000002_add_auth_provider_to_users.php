@@ -9,15 +9,16 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            // both = owner screens + driver screens; driver = jornadas only; owner = fleet screens only
-            $table->string('account_mode', 16)->default('owner')->after('language');
+            // Cómo se creó la cuenta: password (registro email) o google (Socialite / id_token).
+            $table->string('auth_provider', 32)->default('password')->after('email');
+            $table->string('google_id')->nullable()->unique()->after('auth_provider');
         });
     }
 
     public function down(): void
     {
         Schema::table('users', function (Blueprint $table) {
-            $table->dropColumn('account_mode');
+            $table->dropColumn(['auth_provider', 'google_id']);
         });
     }
 };

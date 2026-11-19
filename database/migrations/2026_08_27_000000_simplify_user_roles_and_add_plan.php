@@ -34,27 +34,8 @@ return new class extends Migration
 
     public function down(): void
     {
-        // First widen the enum to allow assigning 'driver'.
         Schema::table('users', function (Blueprint $table) {
-            $table->enum('role', ['admin', 'user', 'driver'])->default('user')->change();
-        });
-
-        // Convert any 'user' role back to 'driver' so the final enum change is valid.
-        DB::table('users')->where('role', 'user')->update(['role' => 'driver']);
-
-        // Drop `plan` and `premium_expires_at` only if they exist to avoid errors during rollback.
-        if (Schema::hasColumn('users', 'plan') || Schema::hasColumn('users', 'premium_expires_at')) {
-            Schema::table('users', function (Blueprint $table) {
-                if (Schema::hasColumn('users', 'plan')) {
-                    $table->dropColumn('plan');
-                }
-                if (Schema::hasColumn('users', 'premium_expires_at')) {
-                    $table->dropColumn('premium_expires_at');
-                }
-            });
-        }
-
-        Schema::table('users', function (Blueprint $table) {
+            $table->dropColumn(['plan', 'premium_expires_at']);
             $table->enum('role', ['admin', 'owner', 'driver'])->default('driver')->change();
             $table->string('owner_code')->nullable()->unique()->after('role');
             $table->foreignId('owner_id')->nullable()->constrained('users')->cascadeOnDelete()->after('owner_code');

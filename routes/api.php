@@ -21,6 +21,9 @@ Route::post('/auth/google/mobile', [AuthController::class, 'mobileGoogle']);
 Route::get('/car-catalog/makes', [\App\Http\Controllers\CarCatalogController::class, 'makes']);
 Route::get('/car-catalog/models', [\App\Http\Controllers\CarCatalogController::class, 'models']);
 
+// Tarifas interurbanas de taxi por comunidad autónoma (referencia para el precio/km)
+Route::get('/reference/taxi-tariffs', [\App\Http\Controllers\TaxiTariffController::class, 'index']);
+
 // Rutas protegidas con Sanctum (owner/driver/admin)
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', [AuthController::class, 'userProfile']);
@@ -28,31 +31,30 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('/user/password', [AuthController::class, 'updatePassword']);
     Route::patch('/user/avatar-color', [AuthController::class, 'updateAvatarColor']);
     Route::patch('/user/preferences', [AuthController::class, 'updatePreferences']);
+    // Resumen / analytics / export propios; un admin puede pedir el de otro con ?user_id=.
+    Route::get('/reports/user-summary', [\App\Http\Controllers\ReportController::class, 'userSummary']);
+    Route::get('/reports/user-analytics', [\App\Http\Controllers\ReportController::class, 'userAnalytics']);
+    Route::get('/reports/user-export', [\App\Http\Controllers\ReportController::class, 'userExport']);
     Route::get('/geocode/search', [\App\Http\Controllers\GeocodingController::class, 'search']);
     Route::get('/geocode/distance', [\App\Http\Controllers\GeocodingController::class, 'distance']);
     Route::get('/geocode/status', [\App\Http\Controllers\GeocodingController::class, 'status']);
-    // Full rutas CRUD requires authentication (index/store were previously public).
+    // Protected ruta actions: show, update, destroy
+    // Listar y crear también exigen sesión: sin ella, el listado devolvía los
+    // viajes de todos los usuarios (con nombre y teléfono del cliente).
     Route::apiResource('rutas', RutaController::class);
+    // Marcar como revisado un cierre automático ("Por revisar" → "Correcto")
+    Route::post('/rutas/{ruta}/review', [RutaController::class, 'review']);
+    // Restaurar un viaje eliminado (borrado blando)
+    Route::post('/rutas/{ruta}/restore', [RutaController::class, 'restore'])->withTrashed();
     // Vehicles CRUD
     Route::apiResource('vehicles', \App\Http\Controllers\VehicleController::class);
-    Route::patch('/vehicles/{vehicle}/default', [\App\Http\Controllers\VehicleController::class, 'setDefault']);
 
-    // Jornadas (day shifts with join codes)
-    Route::get('/jornadas', [\App\Http\Controllers\JornadaController::class, 'index']);
-    Route::post('/jornadas', [\App\Http\Controllers\JornadaController::class, 'store']);
-    Route::post('/jornadas/join', [\App\Http\Controllers\JornadaController::class, 'join']);
-    Route::get('/driver/jornadas', [\App\Http\Controllers\JornadaController::class, 'myJoined']);
-    Route::get('/jornadas/{jornada}', [\App\Http\Controllers\JornadaController::class, 'show']);
-    Route::patch('/jornadas/{jornada}', [\App\Http\Controllers\JornadaController::class, 'update']);
-    Route::delete('/jornadas/{jornada}', [\App\Http\Controllers\JornadaController::class, 'destroy']);
-    Route::get('/jornadas/{jornada}/vehicles', [\App\Http\Controllers\JornadaController::class, 'vehicles']);
-
-    // Owner monthly codes (legacy — prefer /jornadas)
+    // Owner monthly codes
     Route::get('/owner/codes', [\App\Http\Controllers\OwnerCodeController::class, 'index']);
     Route::post('/owner/codes', [\App\Http\Controllers\OwnerCodeController::class, 'store']);
     Route::delete('/owner/codes/{ownerMonthCode}', [\App\Http\Controllers\OwnerCodeController::class, 'destroy']);
 
-    // Drivers joining monthly codes (legacy — prefer /jornadas/join)
+    // Drivers joining codes
     Route::post('/driver/join-code', [\App\Http\Controllers\DriverCodeController::class, 'join']);
     Route::get('/driver/my-codes', [\App\Http\Controllers\DriverCodeController::class, 'listMyCodes']);
 

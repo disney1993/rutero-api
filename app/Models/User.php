@@ -4,6 +4,7 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens; // ✅ Esto es lo que falta
@@ -11,7 +12,8 @@ use Laravel\Sanctum\HasApiTokens; // ✅ Esto es lo que falta
 class User extends Authenticatable
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasApiTokens, HasFactory, Notifiable;
+    // SoftDeletes: listados, login y resolución Sanctum ignoran cuentas borradas.
+    use HasApiTokens, HasFactory, Notifiable, SoftDeletes;
 
     /**
      * The attributes that are mass assignable.
@@ -29,8 +31,15 @@ class User extends Authenticatable
         'currency',
         'theme',
         'language',
-        'account_mode',
+        'work_mode',
+        'auto_complete_enabled',
+        'auto_complete_start_delay_min',
+        'auto_complete_margin_min',
+        'auto_complete_margin_pct',
+        'auto_complete_default_duration_min',
         'email',
+        'auth_provider',
+        'google_id',
         'password',
         'role',
         'plan',
@@ -42,7 +51,9 @@ class User extends Authenticatable
         'has_driver_capability',
         'is_admin',
         'is_premium',
-        'is_driver_only',
+        'profile_incomplete',
+        'effective_work_mode',
+        'is_google_account',
     ];
 
     /**
@@ -68,27 +79,17 @@ class User extends Authenticatable
             'first_name' => 'string',
             'last_name' => 'string',
             'premium_expires_at' => 'datetime',
+            'auto_complete_enabled' => 'boolean',
+            'auto_complete_start_delay_min' => 'integer',
+            'auto_complete_margin_min' => 'integer',
+            'auto_complete_margin_pct' => 'integer',
+            'auto_complete_default_duration_min' => 'integer',
         ];
     }
 
     public function vehicles()
     {
         return $this->hasMany(Vehicle::class, 'owner_id');
-    }
-
-    public function defaultVehicle()
-    {
-        return $this->hasOne(Vehicle::class, 'owner_id')->where('is_default', true);
-    }
-
-    public function jornadas()
-    {
-        return $this->hasMany(Jornada::class, 'owner_id');
-    }
-
-    public function jornadaDriverEntries()
-    {
-        return $this->hasMany(JornadaDriverEntry::class, 'driver_id');
     }
 
     public function ownerMonthCodes()
@@ -103,15 +104,12 @@ class User extends Authenticatable
 
     public function hasOwnerCapability(): bool
     {
-        return $this->vehicles()->exists()
-            || $this->jornadas()->exists()
-            || $this->ownerMonthCodes()->exists();
+        return $this->vehicles()->exists() || $this->ownerMonthCodes()->exists();
     }
 
     public function hasDriverCapability(): bool
     {
-        return $this->jornadaDriverEntries()->exists()
-            || $this->driverCodeEntries()->exists();
+        return $this->driverCodeEntries()->exists();
     }
 
     public function isAdmin(): bool
@@ -125,9 +123,18 @@ class User extends Authenticatable
             && (! $this->premium_expires_at || $this->premium_expires_at->isFuture());
     }
 
-    public function isDriverOnly(): bool
+    // Los logins con Google pueden crear el usuario sin nombre/apellido si
+    // Google no los devuelve; esto permite detectarlo y forzar completar el
+    // perfil antes de dejar usar el resto de la app.
+    public function hasIncompleteProfile(): bool
     {
-        return ($this->account_mode ?? 'owner') === 'driver';
+        return blank($this->first_name) || blank($this->last_name);
+    }
+
+    /** Cuenta creada vía Google (email no editable; contraseña no gestionable aquí). */
+    public function isGoogleAccount(): bool
+    {
+        return $this->auth_provider === 'google';
     }
 
     public function getHasOwnerCapabilityAttribute(): bool
@@ -150,8 +157,41 @@ class User extends Authenticatable
         return $this->isPremium();
     }
 
-    public function getIsDriverOnlyAttribute(): bool
+    public function getProfileIncompleteAttribute(): bool
     {
-        return $this->isDriverOnly();
+        return $this->hasIncompleteProfile();
+    }
+
+    /**
+     * Modo de trabajo efectivo para la app: con capacidad de propietario
+     * respeta work_mode (puede probar driver sin haber unido códigos aún);
+     * conductor puro → driver; resto → owner (usuarios nuevos sin flota).
+     */
+    public function effectiveWorkMode(): string
+    {
+        $owner = $this->hasOwnerCapability();
+        $driver = $this->hasDriverCapability();
+
+        if ($owner) {
+            return in_array($this->work_mode, ['owner', 'driver'], true)
+                ? $this->work_mode
+                : 'owner';
+        }
+
+        if ($driver) {
+            return 'driver';
+        }
+
+        return 'owner';
+    }
+
+    public function getEffectiveWorkModeAttribute(): string
+    {
+        return $this->effectiveWorkMode();
+    }
+
+    public function getIsGoogleAccountAttribute(): bool
+    {
+        return $this->isGoogleAccount();
     }
 }

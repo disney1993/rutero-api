@@ -27,7 +27,7 @@ class AuditController extends Controller
     public function index(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'auditable_type' => ['sometimes', 'string', 'in:ruta,vehicle,jornada'],
+            'auditable_type' => ['sometimes', 'string', 'in:ruta,vehicle'],
             'auditable_id' => ['sometimes', 'integer'],
             'user_id' => ['sometimes', 'integer'],
         ]);
@@ -38,7 +38,6 @@ class AuditController extends Controller
             $map = [
                 'ruta' => Ruta::class,
                 'vehicle' => Vehicle::class,
-                'jornada' => \App\Models\Jornada::class,
             ];
             $query->where('auditable_type', $map[$data['auditable_type']]);
         }
