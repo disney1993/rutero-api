@@ -442,8 +442,9 @@ class RutaController extends Controller
      *     jornada), si tiene vínculo activo con el propietario o si son de
      *     días anteriores (al dejar el equipo conserva su historial);
      *  b) los SIN asignar de los propietarios de su equipo, desde el día en
-     *     que se unió: son la jornada compartida. Al completarlos o
-     *     confirmarlos pasan a su nombre (ver update y review).
+     *     que se unió: son la jornada compartida. Si la jornada del viaje
+     *     es solo para sus conductores asignados (visibility), solo ellos. Al
+     *     completarlos o confirmarlos pasan a su nombre (ver update y review).
      */
     private function scopeDriverAccess($q, User $user)
     {
@@ -466,6 +467,16 @@ class RutaController extends Controller
                             ->where('owner_drivers.driver_id', $user->id)
                             ->where('owner_drivers.status', OwnerDriver::STATUS_ACTIVE)
                             ->whereRaw('DATE(owner_drivers.accepted_at) <= rutas.trip_date');
+                    })
+                    ->where(function ($q) use ($user) {
+                        $q->whereNull('rutas.jornada_id')
+                            ->orWhereExists(fn ($sub) => $sub->selectRaw('1')->from('jornadas')
+                                ->whereColumn('jornadas.id', 'rutas.jornada_id')
+                                ->where('jornadas.visibility', Jornada::VISIBLE_TO_TEAM))
+                            ->orWhereExists(fn ($sub) => $sub->selectRaw('1')->from('jornada_drivers')
+                                ->whereColumn('jornada_drivers.jornada_id', 'rutas.jornada_id')
+                                ->where('jornada_drivers.driver_id', $user->id)
+                                ->whereNull('jornada_drivers.removed_at'));
                     });
             });
         });
@@ -507,15 +518,21 @@ class RutaController extends Controller
         return $query->first();
     }
 
-    /** Viaje sin asignar de un propietario de su equipo, desde que se unió. */
+    /**
+     * Viaje sin asignar de un propietario de su equipo, desde que se unió, y
+     * de una jornada visible para él (la misma regla que scopeDriverAccess).
+     */
     private function isUnassignedForTeamDriver(Ruta $ruta, User $user): bool
     {
         if ($ruta->driver_id !== null || ! $ruta->trip_date) {
             return false;
         }
         $link = OwnerDriver::active()->where('owner_id', $ruta->owner_id)->where('driver_id', $user->id)->first();
+        if (! $link || ! $link->accepted_at || $link->accepted_at->toDateString() > $ruta->trip_date->toDateString()) {
+            return false;
+        }
 
-        return $link && $link->accepted_at && $link->accepted_at->toDateString() <= $ruta->trip_date->toDateString();
+        return ! $ruta->jornada_id || ! $ruta->jornada || $ruta->jornada->isVisibleTo($user->id);
     }
 
     private function attachAutoCompleteEta($rutas): void

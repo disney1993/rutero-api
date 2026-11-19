@@ -6,13 +6,19 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Jornada de trabajo de un día: conductor y vehículo. Un mismo día puede tener
- * varias (normalmente una por conductor). El conductor lo asigna el propietario
- * entre los de su equipo.
+ * Jornada de trabajo de un día: conductor principal, vehículo y conductores
+ * asignados (drivers). Un mismo día puede tener varias. Los conductores los
+ * asigna el propietario entre los de su equipo, y cada uno recibe un aviso.
  */
 class Jornada extends Model
 {
-    protected $fillable = ['owner_id', 'date', 'label', 'driver_id', 'vehicle_id', 'position'];
+    /** Los viajes sin asignar los ve todo el equipo. */
+    public const VISIBLE_TO_TEAM = 'team';
+
+    /** Los viajes sin asignar solo los ven los conductores asignados. */
+    public const VISIBLE_TO_DRIVERS = 'drivers';
+
+    protected $fillable = ['owner_id', 'date', 'label', 'driver_id', 'vehicle_id', 'position', 'visibility'];
 
     // Columna de los antiguos códigos de jornada; se borra en una migración aparte.
     protected $hidden = ['code'];
@@ -39,6 +45,68 @@ class Jornada extends Model
     public function rutas()
     {
         return $this->hasMany(Ruta::class, 'jornada_id');
+    }
+
+    /**
+     * Conductores asignados ahora a la jornada (sin los retirados), con cuándo
+     * se les avisó y si lo han visto. Quien deja el equipo pierde el acceso
+     * aunque siga aquí: también se comprueba el vínculo activo.
+     */
+    public function drivers()
+    {
+        return $this->belongsToMany(User::class, 'jornada_drivers', 'jornada_id', 'driver_id')
+            ->withPivot(['notified_at', 'email_sent_at', 'seen_at'])
+            ->withTimestamps()
+            ->wherePivotNull('removed_at');
+    }
+
+    /** Todos los avisos de la jornada, también de conductores retirados (para mostrar si ya se avisó). */
+    public function notices()
+    {
+        return $this->belongsToMany(User::class, 'jornada_drivers', 'jornada_id', 'driver_id')
+            ->withPivot(['notified_at', 'seen_at', 'removed_at']);
+    }
+
+    /** ¿Ve este conductor los viajes sin asignar de la jornada? (además de ser del equipo) */
+    public function isVisibleTo(int $driverId): bool
+    {
+        // Recién creada en memoria aún no trae el valor por defecto de la columna.
+        return ($this->visibility ?? self::VISIBLE_TO_TEAM) === self::VISIBLE_TO_TEAM
+            || $this->drivers()->where('users.id', $driverId)->exists();
+    }
+
+    /**
+     * Deja asignados exactamente $driverIds. A quien entra por primera vez se
+     * le registra el aviso (obligatorio); a quien vuelve tras ser retirado no
+     * se le avisa otra vez; a quien sale se le marca como retirado.
+     *
+     * @return int[] ids de los conductores avisados ahora
+     */
+    public function assignDrivers(array $driverIds): array
+    {
+        $ids = array_values(array_unique(array_map('intval', array_filter($driverIds))));
+        $now = now();
+        $rows = DB::table('jornada_drivers')->where('jornada_id', $this->id)->get()->keyBy('driver_id');
+
+        $notified = [];
+        foreach ($ids as $id) {
+            $row = $rows->get($id);
+            if (! $row) {
+                DB::table('jornada_drivers')->insert([
+                    'jornada_id' => $this->id, 'driver_id' => $id, 'notified_at' => $now,
+                    'created_at' => $now, 'updated_at' => $now,
+                ]);
+                $notified[] = $id;
+            } elseif ($row->removed_at) {
+                DB::table('jornada_drivers')->where('id', $row->id)->update(['removed_at' => null, 'updated_at' => $now]);
+            }
+        }
+
+        DB::table('jornada_drivers')->where('jornada_id', $this->id)->whereNull('removed_at')
+            ->whereNotIn('driver_id', $ids ?: [0])
+            ->update(['removed_at' => $now, 'updated_at' => $now]);
+
+        return $notified;
     }
 
     /**

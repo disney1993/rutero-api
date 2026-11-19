@@ -70,6 +70,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/jornadas', [\App\Http\Controllers\JornadaController::class, 'store']);
     Route::patch('/jornadas/{jornada}', [\App\Http\Controllers\JornadaController::class, 'update']);
     Route::delete('/jornadas/{jornada}', [\App\Http\Controllers\JornadaController::class, 'destroy']);
+    // Conductor: jornadas que le han asignado y marcar el aviso como visto
+    Route::get('/me/jornadas', [\App\Http\Controllers\JornadaController::class, 'mine']);
+    Route::post('/me/jornadas/{jornada}/seen', [\App\Http\Controllers\JornadaController::class, 'seen']);
 
     // Gastos del propietario (pantalla Gastos e informes de beneficio)
     Route::get('/reference/expense-categories', [\App\Http\Controllers\ExpenseController::class, 'categories']);

@@ -2,12 +2,15 @@
 
 namespace Tests\Feature;
 
+use App\Mail\JornadaAssignedMail;
 use App\Models\Jornada;
 use App\Models\OwnerDriver;
 use App\Models\Ruta;
 use App\Models\User;
 use App\Models\Vehicle;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
@@ -162,5 +165,143 @@ class JornadaTest extends TestCase
 
         $this->assertNull($j->fresh()->driver_id);
         $this->assertNull(Ruta::find($ruta['id'])->driver_id);
+    }
+
+    // ---------------------------------- conductores asignados y su aviso
+
+    private function visibleIds(User $driver): array
+    {
+        return collect($this->as($driver)->getJson('/api/rutas')->assertOk()->json('data'))->pluck('id')->all();
+    }
+
+    private function unassignedTripIn(Jornada $j): int
+    {
+        return $this->as($this->owner)->postJson('/api/rutas', $this->rutaPayload(['jornada_id' => $j->id, 'driver_id' => null]))
+            ->assertCreated()->json('id');
+    }
+
+    private function assignment(Jornada $j, User $driver): ?object
+    {
+        return DB::table('jornada_drivers')->where('jornada_id', $j->id)->where('driver_id', $driver->id)->first();
+    }
+
+    public function test_a_jornada_for_its_drivers_only_shows_its_unassigned_trips_to_them(): void
+    {
+        $pedro = User::factory()->create();
+        OwnerDriver::activate($this->owner->id, $pedro);
+        $j = Jornada::createFor($this->owner, $this->day, ['driver_id' => null]);
+        $this->as($this->owner)->patchJson("/api/jornadas/{$j->id}", ['driver_ids' => [$this->ana->id, $pedro->id], 'visibility' => 'drivers'])
+            ->assertOk()->assertJsonCount(2, 'drivers')->assertJsonPath('visibility', 'drivers');
+        $ruta = $this->unassignedTripIn($j);
+
+        $this->assertSame([$ruta], $this->visibleIds($this->ana));
+        $this->assertSame([$ruta], $this->visibleIds($pedro));
+        $this->assertSame([], $this->visibleIds($this->luis));
+        $this->as($this->luis)->getJson("/api/rutas/{$ruta}")->assertForbidden();
+        $this->as($this->luis)->patchJson("/api/rutas/{$ruta}", ['status' => 'completed'])->assertForbidden();
+
+        // Quien la coge primero se la queda.
+        $this->as($pedro)->patchJson("/api/rutas/{$ruta}", ['status' => 'completed'])
+            ->assertOk()->assertJsonPath('driver_id', $pedro->id);
+    }
+
+    public function test_a_jornada_for_the_whole_team_is_visible_to_everyone_in_it(): void
+    {
+        $j = Jornada::createFor($this->owner, $this->day, ['driver_id' => null]);
+        $this->as($this->owner)->patchJson("/api/jornadas/{$j->id}", ['driver_ids' => [$this->ana->id]])
+            ->assertOk()->assertJsonPath('visibility', 'team');
+        $ruta = $this->unassignedTripIn($j);
+
+        $this->assertSame([$ruta], $this->visibleIds($this->luis));
+        $this->assertSame([$ruta], $this->visibleIds($this->ana));
+    }
+
+    public function test_assigning_a_driver_always_records_one_notice_and_reassigning_does_not_repeat_it(): void
+    {
+        $j = Jornada::createFor($this->owner, $this->day, ['driver_id' => null]);
+        $this->as($this->owner)->patchJson("/api/jornadas/{$j->id}", ['driver_ids' => [$this->ana->id], 'visibility' => 'drivers'])->assertOk();
+        $first = $this->assignment($j, $this->ana);
+        $this->assertNotNull($first->notified_at);
+        $ruta = $this->unassignedTripIn($j);
+
+        // Se la quitan: deja de verla, pero el aviso sigue registrado.
+        $this->travel(1)->hours();
+        $this->as($this->owner)->patchJson("/api/jornadas/{$j->id}", ['driver_ids' => []])->assertOk()->assertJsonCount(0, 'drivers');
+        $this->assertSame([], $this->visibleIds($this->ana));
+        $this->assertNotNull($this->assignment($j, $this->ana)->removed_at);
+
+        // Se la vuelven a asignar: la ve otra vez, sin otro aviso.
+        $this->as($this->owner)->patchJson("/api/jornadas/{$j->id}", ['driver_ids' => [$this->ana->id]])->assertOk();
+        $again = $this->assignment($j, $this->ana);
+        $this->assertNull($again->removed_at);
+        $this->assertSame($first->notified_at, $again->notified_at);
+        $this->assertSame([$ruta], $this->visibleIds($this->ana));
+    }
+
+    public function test_the_notice_is_emailed_once_when_mail_is_configured(): void
+    {
+        Mail::fake();
+        config(['rutero.invitations.send_email' => true]);
+        $j = Jornada::createFor($this->owner, $this->day, ['driver_id' => null]);
+
+        $this->as($this->owner)->patchJson("/api/jornadas/{$j->id}", ['driver_ids' => [$this->ana->id]])->assertOk();
+        $this->as($this->owner)->patchJson("/api/jornadas/{$j->id}", ['driver_ids' => []])->assertOk();
+        $this->as($this->owner)->patchJson("/api/jornadas/{$j->id}", ['driver_ids' => [$this->ana->id]])->assertOk();
+
+        Mail::assertSent(JornadaAssignedMail::class, 1);
+        Mail::assertSent(JornadaAssignedMail::class, fn ($m) => $m->hasTo($this->ana->email));
+        $this->assertNotNull($this->assignment($j, $this->ana)->email_sent_at);
+    }
+
+    public function test_the_main_driver_also_gets_the_notice(): void
+    {
+        $created = $this->as($this->owner)->postJson('/api/jornadas', ['date' => $this->day, 'driver_id' => $this->luis->id])
+            ->assertCreated()->json();
+        $this->assertNotNull($this->assignment(Jornada::find($created['id']), $this->luis)?->notified_at);
+
+        // Cambiar de principal sin tocar la lista: sale el anterior, entra el nuevo.
+        $this->as($this->owner)->patchJson("/api/jornadas/{$created['id']}", ['driver_id' => $this->ana->id])->assertOk();
+        $ids = collect($this->as($this->owner)->getJson("/api/jornadas?date={$this->day}")->json('0.drivers'))->pluck('id')->all();
+        $this->assertSame([$this->ana->id], $ids);
+    }
+
+    public function test_the_driver_sees_their_jornadas_and_marks_the_notice_as_seen(): void
+    {
+        $j = Jornada::createFor($this->owner, $this->day, ['driver_id' => null]);
+        $this->as($this->owner)->patchJson("/api/jornadas/{$j->id}", ['driver_ids' => [$this->ana->id]])->assertOk();
+
+        $this->as($this->ana)->getJson('/api/me/jornadas')->assertOk()
+            ->assertJsonCount(1)->assertJsonPath('0.id', $j->id)->assertJsonPath('0.seen_at', null);
+        $this->as($this->luis)->getJson('/api/me/jornadas')->assertOk()->assertJsonCount(0);
+
+        $this->as($this->ana)->postJson("/api/me/jornadas/{$j->id}/seen")->assertOk();
+        $this->as($this->luis)->postJson("/api/me/jornadas/{$j->id}/seen")->assertNotFound();
+        $this->assertNotNull($this->assignment($j, $this->ana)->seen_at);
+        $this->assertNotNull($this->as($this->owner)->getJson("/api/jornadas?date={$this->day}")->json('0.drivers.0.pivot.seen_at'));
+    }
+
+    public function test_only_team_drivers_can_be_assigned_and_other_changes_keep_the_assignment(): void
+    {
+        $stranger = User::factory()->create();
+        $created = $this->as($this->owner)->postJson('/api/jornadas', ['date' => $this->day, 'driver_ids' => [$this->ana->id]])
+            ->assertCreated()->assertJsonPath('drivers.0.id', $this->ana->id)->json();
+
+        $this->as($this->owner)->patchJson("/api/jornadas/{$created['id']}", ['driver_ids' => [$stranger->id]])->assertStatus(422);
+        $this->as($this->owner)->patchJson("/api/jornadas/{$created['id']}", ['label' => 'Mañana'])
+            ->assertOk()->assertJsonCount(1, 'drivers');
+    }
+
+    public function test_a_driver_who_leaves_the_team_loses_access_and_the_jornada_stays_restricted(): void
+    {
+        $j = Jornada::createFor($this->owner, $this->day, ['driver_id' => null]);
+        $this->as($this->owner)->patchJson("/api/jornadas/{$j->id}", ['driver_ids' => [$this->ana->id], 'visibility' => 'drivers'])->assertOk();
+        $this->unassignedTripIn($j);
+
+        OwnerDriver::where('owner_id', $this->owner->id)->where('driver_id', $this->ana->id)
+            ->update(['status' => OwnerDriver::STATUS_REVOKED]);
+
+        $this->assertSame([], $this->visibleIds($this->ana));
+        $this->as($this->ana)->getJson('/api/me/jornadas')->assertOk()->assertJsonCount(0);
+        $this->assertSame([], $this->visibleIds($this->luis));
     }
 }
