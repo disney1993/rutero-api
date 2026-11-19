@@ -54,10 +54,6 @@ Route::middleware('auth:sanctum')->group(function () {
     // Vehicles CRUD
     Route::apiResource('vehicles', \App\Http\Controllers\VehicleController::class);
 
-    // Owner monthly codes
-    Route::get('/owner/codes', [\App\Http\Controllers\OwnerCodeController::class, 'index']);
-    Route::post('/owner/codes', [\App\Http\Controllers\OwnerCodeController::class, 'store']);
-    Route::delete('/owner/codes/{ownerMonthCode}', [\App\Http\Controllers\OwnerCodeController::class, 'destroy']);
 
     // Equipo: propietario y sus conductores (vínculo persistente con consentimiento)
     Route::get('/team', [\App\Http\Controllers\TeamController::class, 'index']);
@@ -74,7 +70,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/jornadas', [\App\Http\Controllers\JornadaController::class, 'store']);
     Route::patch('/jornadas/{jornada}', [\App\Http\Controllers\JornadaController::class, 'update']);
     Route::delete('/jornadas/{jornada}', [\App\Http\Controllers\JornadaController::class, 'destroy']);
-    Route::post('/jornadas/{jornada}/code', [\App\Http\Controllers\JornadaController::class, 'regenerateCode']);
 
     // Gastos del propietario (pantalla Gastos e informes de beneficio)
     Route::get('/reference/expense-categories', [\App\Http\Controllers\ExpenseController::class, 'categories']);
@@ -96,9 +91,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/invoices/{invoice}/corrective', [\App\Http\Controllers\InvoiceController::class, 'corrective']);
     Route::get('/invoice-clients', [\App\Http\Controllers\InvoiceController::class, 'clients']);
 
-    // Drivers joining codes
+    // Canjear el código de una invitación al equipo (el del enlace /i/{código})
     Route::post('/driver/join-code', [\App\Http\Controllers\DriverCodeController::class, 'join'])->middleware('throttle:10,1');
-    Route::get('/driver/my-codes', [\App\Http\Controllers\DriverCodeController::class, 'listMyCodes']);
 
     // Admin oversight
     Route::middleware('admin')->prefix('admin')->group(function () {

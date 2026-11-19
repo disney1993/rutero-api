@@ -60,7 +60,7 @@ class JornadaTest extends TestCase
         ], $attrs);
     }
 
-    public function test_owner_creates_several_jornadas_the_same_day_each_with_its_own_code(): void
+    public function test_owner_creates_several_jornadas_the_same_day(): void
     {
         $first = $this->as($this->owner)->postJson('/api/jornadas', ['date' => $this->day])->assertCreated()->json();
         $second = $this->as($this->owner)->postJson('/api/jornadas', ['date' => $this->day, 'driver_id' => $this->ana->id, 'vehicle_id' => $this->van->id])
@@ -68,7 +68,7 @@ class JornadaTest extends TestCase
 
         $this->assertSame('Jornada 1', $first['label']);
         $this->assertSame('Jornada 2', $second['label']);
-        $this->assertNotSame($first['code'], $second['code']);
+        $this->assertArrayNotHasKey('code', $first);
         $this->assertSame($this->ana->id, $second['driver_id']);
 
         $this->as($this->owner)->getJson("/api/jornadas?date={$this->day}")->assertOk()->assertJsonCount(2)
@@ -150,50 +150,6 @@ class JornadaTest extends TestCase
         $this->as($this->owner)->deleteJson("/api/jornadas/{$j1->id}")->assertStatus(422);
         $this->as($this->owner)->deleteJson("/api/jornadas/{$j2->id}")->assertOk();
         $this->assertModelMissing($j2);
-    }
-
-    public function test_a_jornada_code_refuses_strangers_and_makes_a_team_member_its_driver(): void
-    {
-        $newcomer = User::factory()->create();
-        $j = Jornada::createFor($this->owner, $this->day, ['driver_id' => null]);
-        $ruta = $this->as($this->owner)->postJson('/api/rutas', $this->rutaPayload(['jornada_id' => $j->id, 'driver_id' => null]))->json();
-
-        $this->getJson("/api/invitations/{$j->code}")->assertOk()->assertJsonPath('type', 'jornada')->assertJsonPath('valid_on', $this->day);
-
-        // Un código reenviado no mete a un desconocido en el equipo.
-        $this->as($newcomer)->postJson('/api/driver/join-code', ['code' => $j->code])->assertForbidden();
-        $this->assertFalse(OwnerDriver::isActive($this->owner->id, $newcomer->id));
-        $this->assertNull($j->fresh()->driver_id);
-
-        OwnerDriver::activate($this->owner->id, $newcomer);
-        $this->as($newcomer)->postJson('/api/driver/join-code', ['code' => $j->code])->assertOk()
-            ->assertJsonPath('type', 'jornada')->assertJsonPath('assigned', true);
-
-        $this->assertSame($newcomer->id, $j->fresh()->driver_id);
-        $this->assertSame($newcomer->id, Ruta::find($ruta['id'])->driver_id);
-    }
-
-    public function test_joining_a_jornada_that_already_has_a_driver_does_not_reassign_it(): void
-    {
-        $newcomer = User::factory()->create();
-        OwnerDriver::activate($this->owner->id, $newcomer);
-        $j = Jornada::createFor($this->owner, $this->day, ['driver_id' => $this->luis->id]);
-
-        $this->as($newcomer)->postJson('/api/driver/join-code', ['code' => $j->code])->assertOk()->assertJsonPath('assigned', false);
-
-        $this->assertSame($this->luis->id, $j->fresh()->driver_id);
-    }
-
-    public function test_past_jornada_codes_and_regenerated_codes_are_not_valid(): void
-    {
-        $past = Jornada::createFor($this->owner, now('Europe/Madrid')->subDay()->toDateString());
-        $this->as($this->luis)->postJson('/api/driver/join-code', ['code' => $past->code])->assertStatus(422);
-
-        $j = Jornada::createFor($this->owner, $this->day);
-        $old = $j->code;
-        $new = $this->as($this->owner)->postJson("/api/jornadas/{$j->id}/code")->assertOk()->json('code');
-        $this->assertNotSame($old, $new);
-        $this->getJson("/api/invitations/{$old}")->assertNotFound();
     }
 
     public function test_removing_a_driver_frees_their_future_jornadas_and_pending_trips(): void

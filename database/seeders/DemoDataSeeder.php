@@ -2,8 +2,6 @@
 
 namespace Database\Seeders;
 
-use App\Models\DriverCodeEntry;
-use App\Models\OwnerMonthCode;
 use App\Models\User;
 use App\Models\Vehicle;
 use App\Support\AvatarPalette;
@@ -101,9 +99,6 @@ class DemoDataSeeder extends Seeder
     /** @var array<int, array{name: string, phone: string}> */
     private array $regularClients = [];
 
-    /** @var array<string, true> */
-    private array $usedCodes = [];
-
     /** @var array<int, array<string, mixed>> */
     private array $buffer = [];
 
@@ -115,7 +110,6 @@ class DemoDataSeeder extends Seeder
         for ($i = 0; $i < 40; $i++) {
             $this->regularClients[] = ['name' => $faker->name(), 'phone' => $faker->numerify('6########')];
         }
-        $this->usedCodes = OwnerMonthCode::pluck('code')->flip()->map(fn () => true)->all();
 
         $owner = User::where('email', 'owner@example.test')->first();
         $driver = User::where('email', 'driver@example.test')->first();
@@ -195,13 +189,9 @@ class DemoDataSeeder extends Seeder
                 continue;
             }
 
-            // Jornadas con conductor: ~2 días por semana (sobre todo martes y
-            // sábado) el conductor trabaja para el propietario con un código
-            // del día y se encarga de la mitad de los viajes.
+            // Días con conductor: ~2 por semana (sobre todo martes y sábado) el
+            // conductor del equipo se encarga de la mitad de los viajes.
             $driverToday = $driver && $this->isDriverDay($day) ? $driver : null;
-            if ($driverToday) {
-                $this->createJornada($owner, $driverToday, $day);
-            }
 
             $this->seedDay($owner, $driverToday, $vehicles, $pricePerKm, $day, $count);
         }
@@ -256,26 +246,6 @@ class DemoDataSeeder extends Seeder
         };
 
         return rand(1, 100) <= $chance;
-    }
-
-    private function createJornada(User $owner, User $driver, CarbonImmutable $day): void
-    {
-        $code = OwnerMonthCode::firstOrCreate(
-            ['owner_id' => $owner->id, 'type' => OwnerMonthCode::TYPE_DAY, 'scope_key' => $day->toDateString()],
-            ['code' => $this->uniqueCode(), 'month' => $day->format('Y-m'), 'valid_on' => $day->toDateString()]
-        );
-
-        DriverCodeEntry::firstOrCreate(['owner_month_code_id' => $code->id, 'driver_id' => $driver->id]);
-    }
-
-    private function uniqueCode(): string
-    {
-        do {
-            $code = Str::upper(Str::random(8));
-        } while (isset($this->usedCodes[$code]) || ! preg_match('/^[A-Z0-9]{8}$/', $code));
-        $this->usedCodes[$code] = true;
-
-        return $code;
     }
 
     private function seedDay(User $owner, ?User $driver, array $vehicles, float $pricePerKm, CarbonImmutable $day, int $count): void

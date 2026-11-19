@@ -2,9 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Jornada;
 use App\Models\OwnerDriver;
-use App\Models\OwnerMonthCode;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
@@ -23,20 +21,17 @@ use Illuminate\Http\Response;
 /**
  * Enlaces de invitación: https://<api>/i/{código}.
  *
- * Sirven para los dos tipos de código, que se canjean igual (driver/join-code):
- * - team: invitación al equipo (un solo uso, caduca a los 7 días). Es la
- *   única forma de entrar en el equipo con un código.
- * - day / month: código de una jornada (un día) o de un mes. Solo sirve a
- *   quien ya es del equipo.
+ * El código es el de una invitación al equipo (un solo uso, caduca a los 7
+ * días); también se puede escribir a mano en la app (driver/join-code).
  *
  * La página web intenta abrir la app (rutero://invite/{código}); si no está
  * instalada, ofrece descargarla y muestra el código para escribirlo a mano. El
  * endpoint JSON permite a la app mostrar quién invita antes de unirse. Quien
- * tiene el código solo ve el nombre del propietario y la fecha.
+ * tiene el código solo ve el nombre del propietario.
  */
 class InvitationLinkController extends Controller
 {
-    /** @return array{type: string, owner: User, valid_on: ?string, month: ?string, expires_at: mixed}|null */
+    /** @return array{type: string, owner: User, expires_at: mixed}|null */
     private function resolve(string $code): ?array
     {
         if (! preg_match('/^[A-Za-z0-9]{8}$/', $code)) {
@@ -50,27 +45,7 @@ class InvitationLinkController extends Controller
             ->first();
         if ($invite) {
             return $invite->isExpired() ? null : [
-                'type' => 'team', 'owner' => $invite->owner, 'valid_on' => null, 'month' => null, 'expires_at' => $invite->expires_at,
-            ];
-        }
-
-        $shift = Jornada::where('code', $code)->with('owner:id,first_name,last_name')->first();
-        if ($shift) {
-            return $shift->isJoinable() ? [
-                'type' => 'jornada', 'owner' => $shift->owner, 'valid_on' => $shift->date->toDateString(),
-                'month' => null, 'expires_at' => null, 'label' => $shift->label,
-                'has_driver' => $shift->driver_id !== null,
-            ] : null;
-        }
-
-        $jornada = OwnerMonthCode::where('code', $code)->with('owner:id,first_name,last_name')->first();
-        if ($jornada && $jornada->isJoinable()) {
-            return [
-                'type' => $jornada->isDay() ? 'day' : 'month',
-                'owner' => $jornada->owner,
-                'valid_on' => $jornada->valid_on?->toDateString(),
-                'month' => $jornada->month,
-                'expires_at' => null,
+                'type' => 'team', 'owner' => $invite->owner, 'expires_at' => $invite->expires_at,
             ];
         }
 
@@ -84,12 +59,7 @@ class InvitationLinkController extends Controller
         $links = config('rutero.app_links');
 
         $ownerName = $info ? trim($info['owner']->first_name.' '.$info['owner']->last_name) : null;
-        $headline = match ($info['type'] ?? null) {
-            'day', 'jornada' => "$ownerName te invita a su jornada del ".date('d/m/Y', strtotime($info['valid_on'])),
-            'month' => "$ownerName te invita a sus jornadas de ".date('m/Y', strtotime($info['month'].'-01')),
-            'team' => "$ownerName te invita a su equipo",
-            default => null,
-        };
+        $headline = $info ? "$ownerName te invita a su equipo" : null;
 
         return response()->view('invitations.link', [
             'invite' => $info,
@@ -122,9 +92,6 @@ class InvitationLinkController extends Controller
                 'first_name' => $info['owner']->first_name,
                 'last_name' => $info['owner']->last_name,
             ],
-            'valid_on' => $info['valid_on'],
-            'month' => $info['month'],
-            'label' => $info['label'] ?? null,
             'expires_at' => $info['expires_at'],
         ]);
     }

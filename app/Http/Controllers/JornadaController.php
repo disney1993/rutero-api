@@ -6,7 +6,6 @@ use App\Models\Jornada;
 use App\Models\OwnerDriver;
 use App\Models\User;
 use App\Models\Vehicle;
-use App\Support\ShareCode;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -105,17 +104,6 @@ class JornadaController extends Controller
         $jornada->delete();
 
         return response()->json(['message' => 'Jornada eliminada']);
-    }
-
-    /** Nuevo código (el anterior deja de servir), p. ej. si se compartió por error. */
-    public function regenerateCode(Request $request, Jornada $jornada): JsonResponse
-    {
-        if ($jornada->owner_id !== $request->user()->id) {
-            return response()->json([], 403);
-        }
-        $jornada->update(['code' => ShareCode::generate()]);
-
-        return response()->json($jornada->fresh(self::WITH)->loadCount('rutas'));
     }
 
     // ----------------------------------------------------------------- helpers

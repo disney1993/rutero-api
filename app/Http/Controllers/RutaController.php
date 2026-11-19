@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Models\Jornada;
 use App\Models\OwnerDriver;
-use App\Models\OwnerMonthCode;
 use App\Models\Ruta;
 use App\Models\User;
 use App\Models\Vehicle;
@@ -163,18 +162,9 @@ class RutaController extends Controller
                     $validated['driver_id'] = $requestedDriverId;
                 }
             } elseif ($requestedOwnerId && $requestedOwnerId !== $user->id) {
-                // Conducir para otro propietario: código de mes (mes actual) o de jornada (día del viaje).
-                $tripDate = isset($validated['trip_date'])
-                    ? substr((string) $validated['trip_date'], 0, 10)
-                    : now()->toDateString();
-                $isDriverForOwner = OwnerDriver::isActive($requestedOwnerId, $user->id)
-                    || OwnerMonthCode::where('owner_id', $requestedOwnerId)
-                        ->whereHas('driverEntries', fn ($q) => $q->where('driver_id', $user->id))
-                        ->get()
-                        ->contains(fn ($code) => $code->authorizesDate($tripDate));
-
-                if (! $isDriverForOwner) {
-                    return response()->json(['message' => 'No estás unido al código de este propietario para esta fecha'], 403);
+                // Conducir para otro propietario: hay que ser de su equipo.
+                if (! OwnerDriver::isActive($requestedOwnerId, $user->id)) {
+                    return response()->json(['message' => 'No formas parte del equipo de este propietario'], 403);
                 }
 
                 $drivingForAnotherOwner = true;

@@ -2,14 +2,13 @@
 
 namespace Tests\Feature;
 
-use App\Models\DriverCodeEntry;
 use App\Models\OwnerDriver;
-use App\Models\OwnerMonthCode;
 use App\Models\Ruta;
 use App\Models\User;
 use App\Models\Vehicle;
 use App\Services\RutaAutoCompleter;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -139,19 +138,6 @@ class TeamTest extends TestCase
         $this->as($this->driver)->postJson('/api/driver/join-code', ['code' => 'ABCD1234'])->assertStatus(422);
     }
 
-    public function test_a_month_code_does_not_add_a_stranger_to_the_team(): void
-    {
-        $code = OwnerMonthCode::create([
-            'owner_id' => $this->owner->id, 'code' => 'MONTH001', 'month' => now()->format('Y-m'),
-            'type' => 'month', 'scope_key' => now()->format('Y-m'),
-        ]);
-
-        $this->as($this->driver)->postJson('/api/driver/join-code', ['code' => $code->code])->assertForbidden();
-
-        $this->assertFalse(OwnerDriver::isActive($this->owner->id, $this->driver->id));
-        $this->assertDatabaseMissing('driver_code_entries', ['driver_id' => $this->driver->id]);
-    }
-
     public function test_owner_assigns_a_trip_and_the_driver_sees_it_without_any_code(): void
     {
         $this->link();
@@ -255,10 +241,14 @@ class TeamTest extends TestCase
     {
         // La migración ya se ejecutó sobre una base vacía: se comprueba que la
         // consulta de migración trata igual los datos actuales.
-        $code = OwnerMonthCode::create([
+        // Las tablas de códigos siguen existiendo hasta que se borren.
+        $codeId = DB::table('owner_month_codes')->insertGetId([
             'owner_id' => $this->owner->id, 'code' => 'MIGRA001', 'month' => '2026-10', 'type' => 'month', 'scope_key' => '2026-10',
+            'created_at' => now(), 'updated_at' => now(),
         ]);
-        DriverCodeEntry::create(['owner_month_code_id' => $code->id, 'driver_id' => $this->driver->id]);
+        DB::table('driver_code_entries')->insert([
+            'owner_month_code_id' => $codeId, 'driver_id' => $this->driver->id, 'created_at' => now(), 'updated_at' => now(),
+        ]);
 
         $migration = require database_path('migrations/2026_11_10_000001_create_owner_drivers_table.php');
         $migration->down();
@@ -292,43 +282,6 @@ class TeamTest extends TestCase
         $this->get("/i/{$code}")->assertNotFound()->assertSee('Invitación no válida');
         $this->getJson("/api/invitations/{$code}")->assertNotFound();
         $this->getJson('/api/invitations/ZZZZ9999')->assertNotFound();
-    }
-
-    public function test_a_team_driver_can_use_tomorrows_day_code_today(): void
-    {
-        OwnerDriver::activate($this->owner->id, $this->driver);
-        $tomorrow = now('Europe/Madrid')->addDay()->toDateString();
-        $code = OwnerMonthCode::create([
-            'owner_id' => $this->owner->id, 'code' => 'DAYCODE1', 'month' => substr($tomorrow, 0, 7),
-            'type' => 'day', 'valid_on' => $tomorrow, 'scope_key' => $tomorrow,
-        ]);
-
-        // Se puede compartir la víspera: el código de mañana ya sirve hoy.
-        $this->as($this->driver)->postJson('/api/driver/join-code', ['code' => $code->code])
-            ->assertOk()->assertJsonPath('type', 'day');
-    }
-
-    public function test_jornada_codes_work_as_invitation_links(): void
-    {
-        $this->owner->update(['first_name' => 'Pedro', 'last_name' => 'Ruiz']);
-        $today = now('Europe/Madrid')->toDateString();
-        OwnerMonthCode::create([
-            'owner_id' => $this->owner->id, 'code' => 'JORNADA1', 'month' => substr($today, 0, 7),
-            'type' => 'day', 'valid_on' => $today, 'scope_key' => $today,
-        ]);
-        $yesterday = now('Europe/Madrid')->subDay()->toDateString();
-        OwnerMonthCode::create([
-            'owner_id' => $this->owner->id, 'code' => 'PASADO01', 'month' => substr($yesterday, 0, 7),
-            'type' => 'day', 'valid_on' => $yesterday, 'scope_key' => $yesterday,
-        ]);
-
-        $this->get('/i/JORNADA1')->assertOk()
-            ->assertSee('Pedro Ruiz te invita a su jornada del '.now('Europe/Madrid')->format('d/m/Y'));
-        $this->getJson('/api/invitations/JORNADA1')->assertOk()
-            ->assertJsonPath('type', 'day')->assertJsonPath('valid_on', $today);
-
-        $this->get('/i/PASADO01')->assertNotFound();
-        $this->getJson('/api/invitations/PASADO01')->assertNotFound();
     }
 
     private function ownerRuta(array $attrs = []): Ruta

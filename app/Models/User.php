@@ -92,19 +92,9 @@ class User extends Authenticatable
         return $this->hasMany(Vehicle::class, 'owner_id');
     }
 
-    public function ownerMonthCodes()
-    {
-        return $this->hasMany(OwnerMonthCode::class, 'owner_id');
-    }
-
-    public function driverCodeEntries()
-    {
-        return $this->hasMany(DriverCodeEntry::class, 'driver_id');
-    }
-
     public function hasOwnerCapability(): bool
     {
-        return $this->vehicles()->exists() || $this->ownerMonthCodes()->exists();
+        return $this->vehicles()->exists();
     }
 
     /** Vínculos en los que este usuario es el propietario (su equipo). */
@@ -127,7 +117,7 @@ class User extends Authenticatable
 
     public function hasDriverCapability(): bool
     {
-        return $this->driverLinks()->active()->exists() || $this->driverCodeEntries()->exists();
+        return $this->driverLinks()->active()->exists();
     }
 
     public function isAdmin(): bool

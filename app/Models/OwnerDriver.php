@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Str;
 
 /**
  * Vínculo propietario-conductor (equipo).
@@ -92,14 +93,14 @@ class OwnerDriver extends Model
         return static::active()->where('owner_id', $ownerId)->where('driver_id', $driverId)->exists();
     }
 
-    /**
-     * Código de invitación de 8 caracteres, único también frente a los
-     * códigos de jornada para que el conductor pueda escribirlo en el mismo
-     * campo "Código" de la app.
-     */
+    /** Código de invitación de 8 caracteres (el del enlace /i/{código}). */
     public static function newInviteCode(): string
     {
-        return \App\Support\ShareCode::generate();
+        do {
+            $code = strtoupper(Str::random(8));
+        } while (static::where('invite_code', $code)->exists());
+
+        return $code;
     }
 
     /**

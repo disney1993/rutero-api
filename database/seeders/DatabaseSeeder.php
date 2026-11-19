@@ -2,8 +2,7 @@
 
 namespace Database\Seeders;
 
-use App\Models\DriverCodeEntry;
-use App\Models\OwnerMonthCode;
+use App\Models\OwnerDriver;
 use App\Models\User;
 use App\Models\Vehicle;
 use Illuminate\Database\Seeder;
@@ -73,16 +72,10 @@ class DatabaseSeeder extends Seeder
             ]
         );
 
-        $month = date('Y-m');
-        $ownerCode = OwnerMonthCode::updateOrCreate(
-            ['owner_id' => $owner->id, 'month' => $month, 'type' => OwnerMonthCode::TYPE_MONTH],
-            ['code' => 'OWNER001', 'valid_on' => null]
-        );
-
-        DriverCodeEntry::firstOrCreate([
-            'owner_month_code_id' => $ownerCode->id,
-            'driver_id' => $driver->id,
-        ]);
+        // El conductor demo forma parte del equipo del propietario demo desde
+        // principios de año, para que vea todo el historial de demo.
+        OwnerDriver::activate($owner->id, $driver, OwnerDriver::VIA_EMAIL)
+            ->forceFill(['accepted_at' => now()->startOfYear()])->save();
 
         // Los correos @example.test no existen: sin esto, las cuentas de demo
         // nunca podrían confirmar el email ni recibir invitaciones por email.

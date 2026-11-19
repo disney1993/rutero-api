@@ -2,17 +2,20 @@
 
 namespace App\Models;
 
-use App\Support\ShareCode;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Jornada de trabajo de un día: conductor, vehículo y código para compartirla.
- * Un mismo día puede tener varias (normalmente una por conductor).
+ * Jornada de trabajo de un día: conductor y vehículo. Un mismo día puede tener
+ * varias (normalmente una por conductor). El conductor lo asigna el propietario
+ * entre los de su equipo.
  */
 class Jornada extends Model
 {
-    protected $fillable = ['owner_id', 'date', 'label', 'driver_id', 'vehicle_id', 'code', 'position'];
+    protected $fillable = ['owner_id', 'date', 'label', 'driver_id', 'vehicle_id', 'position'];
+
+    // Columna de los antiguos códigos de jornada; se borra en una migración aparte.
+    protected $hidden = ['code'];
 
     protected $casts = [
         'date' => 'date:Y-m-d',
@@ -36,12 +39,6 @@ class Jornada extends Model
     public function rutas()
     {
         return $this->hasMany(Ruta::class, 'jornada_id');
-    }
-
-    /** Se puede usar el código hasta el día de la jornada incluido (hora de España). */
-    public function isJoinable(): bool
-    {
-        return $this->date->toDateString() >= now(config('rutero.auto_complete.timezone'))->toDateString();
     }
 
     /**
@@ -73,7 +70,6 @@ class Jornada extends Model
                 'label' => $attrs['label'] ?? "Jornada {$position}",
                 'driver_id' => $driverId,
                 'vehicle_id' => $vehicleId,
-                'code' => ShareCode::generate(),
                 'position' => $position,
             ]);
 
