@@ -354,13 +354,13 @@ class AuthTest extends TestCase
         $resp->assertStatus(422)->assertJsonValidationErrors(['password']);
     }
 
-    public function test_register_defaults_price_per_km_to_075()
+    public function test_register_defaults_price_per_km_to_110()
     {
         $resp = $this->postJson('/api/register', [
             'first_name' => 'Default', 'last_name' => 'Price',
             'email' => 'defaultprice@example.test', 'password' => 'Secret123!',
         ]);
-        $resp->assertStatus(200)->assertJsonPath('user.price_per_km', 0.75);
+        $resp->assertStatus(200)->assertJsonPath('user.price_per_km', 1.1);
     }
 
     public function test_updating_currency_alone_does_not_clear_price_per_km()
@@ -370,14 +370,14 @@ class AuthTest extends TestCase
             'email' => 'curronly@example.test', 'password' => 'Secret123!',
         ]);
         $token = $register->json('access_token');
-        $this->assertEquals(0.75, $register->json('user.price_per_km'));
+        $this->assertEquals(1.1, $register->json('user.price_per_km'));
 
         $resp = $this->withHeader('Authorization', "Bearer $token")
             ->patchJson('/api/user/preferences', ['currency' => 'USD']);
 
         $resp->assertStatus(200)
             ->assertJsonPath('currency', 'USD')
-            ->assertJsonPath('price_per_km', 0.75);
+            ->assertJsonPath('price_per_km', 1.1);
     }
 
     public function test_user_can_update_theme_and_language()
@@ -460,7 +460,7 @@ class AuthTest extends TestCase
         $user = $gresp->json('user');
         $this->assertEquals('gdriver@example.test', $user['email']);
         $this->assertEquals('user', $user['role']);
-        $this->assertEquals(0.75, $user['price_per_km']);
+        $this->assertEquals(1.1, $user['price_per_km']);
         $this->assertEquals('google', $user['auth_provider']);
         $this->assertTrue($user['is_google_account']);
     }

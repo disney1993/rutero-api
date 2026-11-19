@@ -7,19 +7,14 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-// Servicios públicos y gratuitos, sin necesidad de API key:
-// - Nominatim (OpenStreetMap) para buscar direcciones reales.
-// - OSRM (demo pública) para calcular la distancia real por carretera
-//   (distance_km + duration_min).
-// Ambos son servicios de demostración compartidos: no tienen SLA ni
-// garantía de disponibilidad para tráfico alto.
-// TODO: si se configura GOOGLE_MAPS_API_KEY, usar Distance Matrix / Routes
-// como primario o fallback, y deep-link de navegación en la app.
-/*
- * Direcciones: Photon (Komoot, datos de OpenStreetMap), pensado para el
- * autocompletado mientras se escribe, y Nominatim como respaldo si Photon
- * falla o no encuentra nada (Nominatim prohíbe el autocompletado como uso
+/**
+ * Direcciones y distancia por carretera en España.
+ *
+ * Buscar: Google Places Text Search si hay GOOGLE_MAPS_API_KEY; si no, o si
+ * falla, Photon (Komoot, OpenStreetMap), pensado para autocompletar; y
+ * Nominatim como último recurso (prohíbe el autocompletado como uso
  * principal). PHOTON_URL permite apuntar a un Photon autoalojado.
+ * Distancia: Google Distance Matrix si hay clave; si no, OSRM.
  * TODO(rutero): OSRM de demostración no es apto para producción.
  *   router.project-osrm.org es un servicio de pruebas (1 petición/s, sin
  *   garantías). Autoalojar OSRM con el extracto de España o usar
@@ -28,8 +23,13 @@ use Illuminate\Support\Facades\Log;
 class GeocodingController extends Controller
 {
     private const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
+
     private const OSRM_URL = 'https://router.project-osrm.org/route/v1/driving';
-    // Nominatim exige un User-Agent que identifique la aplicación.
+
+    private const GOOGLE_PLACES_TEXTSEARCH_URL = 'https://maps.googleapis.com/maps/api/place/textsearch/json';
+
+    private const GOOGLE_DISTANCE_MATRIX_URL = 'https://maps.googleapis.com/maps/api/distancematrix/json';
+
     private const USER_AGENT = 'RuteroApp/1.0 (contacto: soporte@rutero.local)';
 
     /** Photon: resultados de España con el mismo formato que Nominatim. */
@@ -67,6 +67,7 @@ class GeocodingController extends Controller
                     'display_name' => implode(', ', array_unique($parts)),
                     'lat' => (float) $f['geometry']['coordinates'][1],
                     'lon' => (float) $f['geometry']['coordinates'][0],
+                    'provider' => 'photon',
                 ];
             })
             ->filter(fn ($r) => $r['display_name'] !== '')
@@ -79,59 +80,69 @@ class GeocodingController extends Controller
     public function search(Request $request)
     {
         $request->validate([
-            'q' => 'required|string|min:3|max:200',
+            'q' => 'required|string|min:2|max:200',
         ]);
 
         $query = trim($request->input('q'));
-        $cacheKey = 'geocode:search:' . md5(strtolower($query));
+        $isPostalCode = (bool) preg_match('/^\d{4,5}$/', $query);
+
+        if (! $isPostalCode && mb_strlen($query) < 3) {
+            return response()->json([
+                'message' => 'The q field must be at least 3 characters.',
+                'errors' => ['q' => ['The q field must be at least 3 characters.']],
+            ], 422);
+        }
+
+        $cacheKey = 'geocode:search:v3:'.md5(strtolower($query).'|'.$this->providerPreference());
 
         $cached = Cache::get($cacheKey);
         if ($cached !== null) {
-            return response()->json($cached);
+            $cachedProvider = is_array($cached) && isset($cached[0]['provider'])
+                ? (string) $cached[0]['provider']
+                : 'cache';
+
+            return response()->json($cached)->header('X-Geocode-Provider', $cachedProvider);
         }
 
-        // 1) Photon; 2) si falla o no encuentra nada, Nominatim.
-        try {
-            $results = $this->searchPhoton($query);
-            if ($results !== []) {
-                Cache::put($cacheKey, $results, now()->addDay());
+        $results = null;
+        $usedProvider = null;
 
-                return response()->json($results);
+        if ($this->shouldUseGoogle()) {
+            try {
+                $results = $this->searchWithGoogle($query, $isPostalCode);
+                $usedProvider = 'google';
+            } catch (\Throwable $e) {
+                Log::warning('Google Places search failed: '.$e->getMessage());
             }
-        } catch (\Throwable $e) {
-            Log::info('Photon search failed, falling back to Nominatim: '.$e->getMessage());
         }
 
-        try {
-            $resp = Http::withHeaders(['User-Agent' => self::USER_AGENT])
-                ->timeout(6)
-                ->get(self::NOMINATIM_URL, [
-                    'q' => $query,
-                    'format' => 'json',
-                    'countrycodes' => 'es',
-                    'addressdetails' => 0,
-                    'limit' => 6,
-                ]);
-
-            if (! $resp->ok()) {
-                throw new \RuntimeException('Nominatim respondió ' . $resp->status());
+        // Sin Google (o si falla): Photon; si no encuentra nada, Nominatim.
+        if ($results === null) {
+            try {
+                $photon = $this->searchPhoton($query);
+                if ($photon !== []) {
+                    $results = $photon;
+                    $usedProvider = 'photon';
+                }
+            } catch (\Throwable $e) {
+                Log::info('Photon search failed, falling back to Nominatim: '.$e->getMessage());
             }
-
-            $results = collect($resp->json())->map(fn ($item) => [
-                'display_name' => $item['display_name'],
-                'lat' => (float) $item['lat'],
-                'lon' => (float) $item['lon'],
-            ])->values()->all();
-        } catch (\Throwable $e) {
-            Log::warning('Nominatim search failed: ' . $e->getMessage());
-            return response()->json(['message' => 'No se pudo buscar la dirección ahora mismo. Puedes escribirla a mano.'], 503);
         }
 
-        // Solo se cachean los éxitos: un fallo puntual del servicio externo
-        // no debe "congelarse" durante 24h para todo el mundo.
+        if ($results === null) {
+            try {
+                $results = $this->searchWithNominatim($query, $isPostalCode);
+                $usedProvider = 'nominatim';
+            } catch (\Throwable $e) {
+                Log::warning('Nominatim search failed: '.$e->getMessage());
+
+                return response()->json(['message' => 'No se pudo buscar la dirección ahora mismo. Puedes escribirla a mano.'], 503);
+            }
+        }
+
         Cache::put($cacheKey, $results, now()->addDay());
 
-        return response()->json($results);
+        return response()->json($results)->header('X-Geocode-Provider', $usedProvider ?? 'unknown');
     }
 
     public function distance(Request $request)
@@ -143,46 +154,263 @@ class GeocodingController extends Controller
             'destination_lng' => 'required|numeric|between:-180,180',
         ]);
 
-        $cacheKey = 'geocode:distance:' . md5(implode(',', $data));
+        $cacheKey = 'geocode:distance:v3:'.md5(implode(',', $data).'|'.$this->providerPreference());
 
         $cached = Cache::get($cacheKey);
         if ($cached !== null) {
-            return response()->json($cached);
-        }
-
-        try {
-            $coords = sprintf(
-                '%F,%F;%F,%F',
-                $data['origin_lng'],
-                $data['origin_lat'],
-                $data['destination_lng'],
-                $data['destination_lat']
+            return response()->json($cached)->header(
+                'X-Geocode-Provider',
+                (string) ($cached['provider'] ?? 'cache')
             );
-
-            $resp = Http::timeout(8)->get(self::OSRM_URL . '/' . $coords, [
-                'overview' => 'false',
-            ]);
-
-            if (! $resp->ok() || $resp->json('code') !== 'Ok') {
-                throw new \RuntimeException('OSRM respondió ' . $resp->status());
-            }
-
-            $route = $resp->json('routes.0');
-            if (! $route) {
-                throw new \RuntimeException('OSRM no devolvió ninguna ruta');
-            }
-
-            $result = [
-                'distance_km' => round($route['distance'] / 1000, 1),
-                'duration_min' => round($route['duration'] / 60),
-            ];
-        } catch (\Throwable $e) {
-            Log::warning('OSRM distance failed: ' . $e->getMessage());
-            return response()->json(['message' => 'No se pudo calcular la distancia ahora mismo. Puedes introducirla a mano.'], 503);
         }
 
+        $result = null;
+        $usedProvider = null;
+
+        if ($this->shouldUseGoogle()) {
+            try {
+                $result = $this->distanceWithGoogle($data);
+                $usedProvider = 'google';
+            } catch (\Throwable $e) {
+                Log::warning('Google Distance Matrix failed: '.$e->getMessage());
+            }
+        }
+
+        if ($result === null) {
+            try {
+                $result = $this->distanceWithOsrm($data);
+                $usedProvider = 'osrm';
+            } catch (\Throwable $e) {
+                Log::warning('OSRM distance failed: '.$e->getMessage());
+
+                return response()->json(['message' => 'No se pudo calcular la distancia ahora mismo. Puedes introducirla a mano.'], 503);
+            }
+        }
+
+        $result['provider'] = $usedProvider;
         Cache::put($cacheKey, $result, now()->addDay());
 
-        return response()->json($result);
+        return response()->json($result)->header('X-Geocode-Provider', $usedProvider ?? 'unknown');
+    }
+
+    public function status()
+    {
+        $keyConfigured = filled(config('services.google.maps_api_key'));
+        $preferred = $this->providerPreference();
+        $useGoogle = $this->shouldUseGoogle();
+
+        return response()->json([
+            'preferred' => $preferred,
+            'google_configured' => $keyConfigured,
+            'active_search' => $useGoogle ? 'google' : 'nominatim',
+            'active_distance' => $useGoogle ? 'google' : 'osrm',
+            'labels' => [
+                'google' => 'Google Maps',
+                'nominatim' => 'Nominatim (OpenStreetMap, gratis)',
+                'osrm' => 'OSRM (ruta, gratis)',
+            ],
+            // Informative only — real remaining quota lives in Google Cloud Console.
+            'billing' => [
+                'summary' => 'Desde marzo 2025 el crédito fijo de 200 USD/mes ya no aplica. Cada SKU tiene un cupo gratis mensual; al superarlo se cobra.',
+                'places_text_search' => 'Places Text Search (lo usamos para direcciones): cupo gratis típico ~5.000 eventos/mes (SKU Pro), luego cobro por evento.',
+                'distance_matrix' => 'Distance Matrix Legacy (km entre puntos): ~10.000 elementos/mes gratis; 1 origen × 1 destino = 1 elemento.',
+                'note' => 'Hace falta cuenta de facturación activa en Google Cloud aunque estés en el tramo gratis. El uso en caché de Rutero no consume cuota.',
+                'metrics_url' => 'https://console.cloud.google.com/google/maps-apis/metrics',
+                'pricing_url' => 'https://developers.google.com/maps/billing-and-pricing/pricing',
+            ],
+        ]);
+    }
+
+    private function providerPreference(): string
+    {
+        return strtolower((string) config('rutero.geocoding_provider', 'auto'));
+    }
+
+    private function shouldUseGoogle(): bool
+    {
+        $preference = $this->providerPreference();
+        if ($preference === 'nominatim') {
+            return false;
+        }
+
+        if ($preference === 'google') {
+            return filled(config('services.google.maps_api_key'));
+        }
+
+        // auto
+        return filled(config('services.google.maps_api_key'));
+    }
+
+    private function mapsKey(): string
+    {
+        return (string) config('services.google.maps_api_key');
+    }
+
+    private function searchWithGoogle(string $query, bool $isPostalCode): array
+    {
+        $searchQuery = $isPostalCode
+            ? str_pad($query, 5, '0', STR_PAD_LEFT).' España'
+            : $query;
+
+        $resp = Http::timeout(8)->get(self::GOOGLE_PLACES_TEXTSEARCH_URL, [
+            'query' => $searchQuery,
+            'region' => 'es',
+            'language' => 'es',
+            'key' => $this->mapsKey(),
+        ]);
+
+        if (! $resp->ok()) {
+            throw new \RuntimeException('Google Places HTTP '.$resp->status());
+        }
+
+        $status = $resp->json('status');
+        if (! in_array($status, ['OK', 'ZERO_RESULTS'], true)) {
+            throw new \RuntimeException('Google Places status '.$status.': '.($resp->json('error_message') ?? ''));
+        }
+
+        return collect($resp->json('results') ?? [])
+            ->take(8)
+            ->map(function ($item) {
+                $location = $item['geometry']['location'] ?? null;
+                if (! $location) {
+                    return null;
+                }
+
+                return [
+                    'display_name' => $item['formatted_address'] ?? ($item['name'] ?? ''),
+                    'lat' => (float) $location['lat'],
+                    'lon' => (float) $location['lng'],
+                    'postcode' => null,
+                    'type' => $item['types'][0] ?? 'place',
+                    'place_id' => $item['place_id'] ?? null,
+                    'provider' => 'google',
+                ];
+            })
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    private function distanceWithGoogle(array $data): array
+    {
+        $origin = $data['origin_lat'].','.$data['origin_lng'];
+        $destination = $data['destination_lat'].','.$data['destination_lng'];
+
+        $resp = Http::timeout(8)->get(self::GOOGLE_DISTANCE_MATRIX_URL, [
+            'origins' => $origin,
+            'destinations' => $destination,
+            'mode' => 'driving',
+            'units' => 'metric',
+            'language' => 'es',
+            'region' => 'es',
+            'key' => $this->mapsKey(),
+        ]);
+
+        if (! $resp->ok()) {
+            throw new \RuntimeException('Google Distance Matrix HTTP '.$resp->status());
+        }
+
+        $status = $resp->json('status');
+        if ($status !== 'OK') {
+            throw new \RuntimeException('Google Distance Matrix status '.$status.': '.($resp->json('error_message') ?? ''));
+        }
+
+        $element = $resp->json('rows.0.elements.0');
+        if (! $element || ($element['status'] ?? null) !== 'OK') {
+            throw new \RuntimeException('Google Distance Matrix element status '.($element['status'] ?? 'missing'));
+        }
+
+        return [
+            'distance_km' => round(($element['distance']['value'] ?? 0) / 1000, 1),
+            'duration_min' => round(($element['duration']['value'] ?? 0) / 60),
+        ];
+    }
+
+    private function searchWithNominatim(string $query, bool $isPostalCode): array
+    {
+        $params = [
+            'format' => 'json',
+            'countrycodes' => 'es',
+            'addressdetails' => 1,
+            'limit' => 8,
+        ];
+
+        if ($isPostalCode) {
+            $params['postalcode'] = str_pad($query, 5, '0', STR_PAD_LEFT);
+            $params['country'] = 'Spain';
+        } else {
+            $params['q'] = $query;
+        }
+
+        $resp = Http::withHeaders(['User-Agent' => self::USER_AGENT])
+            ->timeout(6)
+            ->get(self::NOMINATIM_URL, $params);
+
+        if (! $resp->ok()) {
+            throw new \RuntimeException('Nominatim respondió '.$resp->status());
+        }
+
+        $results = collect($resp->json())->map(fn ($item) => [
+            'display_name' => $item['display_name'],
+            'lat' => (float) $item['lat'],
+            'lon' => (float) $item['lon'],
+            'postcode' => $item['address']['postcode'] ?? null,
+            'type' => $item['type'] ?? ($item['class'] ?? null),
+            'provider' => 'nominatim',
+        ])->values()->all();
+
+        if ($results === [] && $isPostalCode) {
+            $fallback = Http::withHeaders(['User-Agent' => self::USER_AGENT])
+                ->timeout(6)
+                ->get(self::NOMINATIM_URL, [
+                    'q' => $query.', España',
+                    'format' => 'json',
+                    'countrycodes' => 'es',
+                    'addressdetails' => 1,
+                    'limit' => 8,
+                ]);
+
+            if ($fallback->ok()) {
+                $results = collect($fallback->json())->map(fn ($item) => [
+                    'display_name' => $item['display_name'],
+                    'lat' => (float) $item['lat'],
+                    'lon' => (float) $item['lon'],
+                    'postcode' => $item['address']['postcode'] ?? null,
+                    'type' => $item['type'] ?? ($item['class'] ?? null),
+                    'provider' => 'nominatim',
+                ])->values()->all();
+            }
+        }
+
+        return $results;
+    }
+
+    private function distanceWithOsrm(array $data): array
+    {
+        $coords = sprintf(
+            '%F,%F;%F,%F',
+            $data['origin_lng'],
+            $data['origin_lat'],
+            $data['destination_lng'],
+            $data['destination_lat']
+        );
+
+        $resp = Http::timeout(8)->get(self::OSRM_URL.'/'.$coords, [
+            'overview' => 'false',
+        ]);
+
+        if (! $resp->ok() || $resp->json('code') !== 'Ok') {
+            throw new \RuntimeException('OSRM respondió '.$resp->status());
+        }
+
+        $route = $resp->json('routes.0');
+        if (! $route) {
+            throw new \RuntimeException('OSRM no devolvió ninguna ruta');
+        }
+
+        return [
+            'distance_km' => round($route['distance'] / 1000, 1),
+            'duration_min' => round($route['duration'] / 60),
+        ];
     }
 }

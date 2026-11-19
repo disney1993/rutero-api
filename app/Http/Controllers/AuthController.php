@@ -15,7 +15,11 @@ class AuthController extends Controller
     // Debe coincidir con PASSWORD_REGEX en rutero-react/src/utils/validators.js:
     // mínimo 6 caracteres, al menos una mayúscula, un número y un símbolo.
     private const PASSWORD_REGEX = '/^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).+$/';
-    private const DEFAULT_PRICE_PER_KM = 0.75;
+
+    private static function defaultPricePerKm(): float
+    {
+        return (float) config('rutero.default_price_per_km', 1.10);
+    }
 
     // ==============================
     // Login con email y contraseña
@@ -46,7 +50,7 @@ class AuthController extends Controller
             'avatar' => $request->avatar,
             'avatar_color' => $request->avatar_color ?: AvatarPalette::random(),
             // Precio orientativo por defecto; el usuario lo puede cambiar luego en Ajustes.
-            'price_per_km' => self::DEFAULT_PRICE_PER_KM,
+            'price_per_km' => self::defaultPricePerKm(),
             'email'    => $request->email,
             'auth_provider' => 'password',
             'password' => Hash::make($request->password),
@@ -240,7 +244,7 @@ class AuthController extends Controller
                 'name' => trim(($firstName ?? '') . ' ' . ($lastName ?? '')) ?: $googleUser->getName(),
                 'avatar' => $avatar,
                 'avatar_color' => AvatarPalette::random(),
-                'price_per_km' => self::DEFAULT_PRICE_PER_KM,
+                'price_per_km' => self::defaultPricePerKm(),
                 'auth_provider' => 'google',
                 'google_id' => $googleId,
                 'password' => Hash::make(uniqid()), // password random
@@ -313,7 +317,7 @@ class AuthController extends Controller
                 'name' => trim(($firstName ?? '') . ' ' . ($lastName ?? '')) ?: $email,
                 'avatar' => $avatar,
                 'avatar_color' => AvatarPalette::random(),
-                'price_per_km' => self::DEFAULT_PRICE_PER_KM,
+                'price_per_km' => self::defaultPricePerKm(),
                 'auth_provider' => 'google',
                 'google_id' => $googleId,
                 'password' => Hash::make(uniqid()),

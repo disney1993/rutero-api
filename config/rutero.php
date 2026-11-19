@@ -46,4 +46,13 @@ return [
         'admin_password' => env('SEED_ADMIN_PASSWORD'),
         'demo_password' => env('SEED_DEMO_PASSWORD'),
     ],
+
+    // Media nacional diurna España ~1,07 €/km (FACUA 2025). Punto de partida
+    // editable en el perfil del usuario.
+    'default_price_per_km' => (float) env('DEFAULT_PRICE_PER_KM', 1.10),
+
+    // auto = Google si hay GOOGLE_MAPS_API_KEY, si no Nominatim/OSRM.
+    // google = forzar Google (si falla la búsqueda, cae a Nominatim).
+    // nominatim = forzar los proveedores gratuitos.
+    'geocoding_provider' => env('GEOCODING_PROVIDER', 'auto'),
 ];

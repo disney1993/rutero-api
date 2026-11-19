@@ -36,12 +36,13 @@ return [
     ],
 
     'google' => [
-    'client_id'     => env('GOOGLE_CLIENT_ID'),
-    'client_secret' => env('GOOGLE_CLIENT_SECRET'),
-    'redirect'      => env('GOOGLE_REDIRECT_URI'),
-    // Client ID de Android e iOS, separados por comas (login desde la app).
-    'mobile_client_ids' => env('GOOGLE_MOBILE_CLIENT_IDS'),
-],
-
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect' => env('GOOGLE_REDIRECT_URI'),
+        // Client ID de Android e iOS, separados por comas (login desde la app).
+        'mobile_client_ids' => env('GOOGLE_MOBILE_CLIENT_IDS'),
+        // Maps Platform key for Places Text Search + Distance Matrix (server-side).
+        'maps_api_key' => env('GOOGLE_MAPS_API_KEY'),
+    ],
 
 ];

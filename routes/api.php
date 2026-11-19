@@ -43,6 +43,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/reports/user-export', [\App\Http\Controllers\ReportController::class, 'userExport']);
     Route::get('/geocode/search', [\App\Http\Controllers\GeocodingController::class, 'search']);
     Route::get('/geocode/distance', [\App\Http\Controllers\GeocodingController::class, 'distance']);
+    Route::get('/geocode/status', [\App\Http\Controllers\GeocodingController::class, 'status']);
     // Protected ruta actions: show, update, destroy
     // Listar y crear también exigen sesión: sin ella, el listado devolvía los
     // viajes de todos los usuarios (con nombre y teléfono del cliente).
@@ -103,5 +104,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::patch('/users/{user}', [\App\Http\Controllers\AdminController::class, 'updateUser']);
         Route::delete('/users/{user}', [\App\Http\Controllers\AdminController::class, 'deleteUser']);
         Route::get('/reports/summary', [\App\Http\Controllers\AdminController::class, 'reportsSummary']);
+        Route::get('/audits', [\App\Http\Controllers\AuditController::class, 'index']);
+        Route::get('/rutas/{ruta}/audits', [\App\Http\Controllers\AuditController::class, 'forRuta']);
+        Route::get('/vehicles/{vehicle}/audits', [\App\Http\Controllers\AuditController::class, 'forVehicle']);
     });
 });
