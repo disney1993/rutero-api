@@ -193,6 +193,12 @@ class TeamController extends Controller
     {
         $user = $request->user();
 
+        // Hasta confirmar el email no se sabe si es suyo: quien se registre con
+        // el email de otra persona no puede ver ni aceptar sus invitaciones.
+        if (! $user->hasVerifiedEmail()) {
+            return response()->json([]);
+        }
+
         $invitations = OwnerDriver::where('status', OwnerDriver::STATUS_PENDING)
             ->where('invited_via', OwnerDriver::VIA_EMAIL)
             ->where('owner_id', '!=', $user->id)
@@ -282,6 +288,9 @@ class TeamController extends Controller
 
     private function isInvitationFor(OwnerDriver $link, User $user): bool
     {
+        if (! $user->hasVerifiedEmail()) {
+            return false;
+        }
         if ($link->status !== OwnerDriver::STATUS_PENDING || $link->invited_via !== OwnerDriver::VIA_EMAIL || $link->owner_id === $user->id) {
             return false;
         }

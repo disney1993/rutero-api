@@ -84,6 +84,12 @@ class DatabaseSeeder extends Seeder
             'driver_id' => $driver->id,
         ]);
 
+        // Los correos @example.test no existen: sin esto, las cuentas de demo
+        // nunca podrían confirmar el email ni recibir invitaciones por email.
+        User::whereIn('email', ['admin@example.test', 'owner@example.test', 'driver@example.test'])
+            ->whereNull('email_verified_at')
+            ->update(['email_verified_at' => now()]);
+
         $this->call(DemoDataSeeder::class);
     }
 

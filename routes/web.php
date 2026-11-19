@@ -7,6 +7,11 @@ Route::get('/', function () {
 	return response('OK', 200);
 });
 
+// Enlace del correo de confirmación de email (lo usa la notificación VerifyEmail).
+Route::get('/email/verify/{id}/{hash}', [\App\Http\Controllers\AuthController::class, 'verifyEmail'])
+    ->middleware(['signed', 'throttle:6,1'])
+    ->name('verification.verify');
+
 // Enlace de invitación al equipo: abre la app o permite descargarla.
 Route::get('/i/{code}', [\App\Http\Controllers\InvitationLinkController::class, 'show'])
     ->middleware('throttle:30,1')

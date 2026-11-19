@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Support\AvatarPalette;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Laravel\Socialite\Facades\Socialite;
 
@@ -51,6 +52,8 @@ class AuthController extends Controller
             'password' => Hash::make($request->password),
             'role'     => 'user',
         ]);
+
+        $this->sendVerificationEmail($user);
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
@@ -127,6 +130,12 @@ class AuthController extends Controller
         }
 
         $user->update($data);
+
+        // El email nuevo hay que confirmarlo de nuevo.
+        if ($emailChanging) {
+            $user->forceFill(['email_verified_at' => null])->save();
+            $this->sendVerificationEmail($user);
+        }
 
         return response()->json($user);
     }
@@ -221,6 +230,7 @@ class AuthController extends Controller
         $lastName = $googleUser->user['family_name'] ?? null;
         $avatar = $googleUser->getAvatar();
         $googleId = $googleUser->getId();
+        $googleVerified = filter_var($googleUser->user['email_verified'] ?? $googleUser->user['verified_email'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
         $user = User::firstOrCreate(
             ['email' => $googleUser->getEmail()],
@@ -240,6 +250,10 @@ class AuthController extends Controller
         if ($user->wasRecentlyCreated === false && blank($user->google_id) && $googleId) {
             $user->google_id = $googleId;
             $user->save();
+        }
+
+        if ($googleVerified && ! $user->hasVerifiedEmail()) {
+            $user->markEmailAsVerified();
         }
 
         $token = $user->createToken('auth_token')->plainTextToken;
@@ -307,6 +321,8 @@ class AuthController extends Controller
         $lastName = $data['family_name'] ?? null;
         $avatar = $data['picture'] ?? null;
         $googleId = $data['sub'] ?? null;
+        // tokeninfo devuelve email_verified como "true"/"false" (texto).
+        $googleVerified = filter_var($data['email_verified'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
         $user = User::firstOrCreate(
             ['email' => $email],
@@ -329,6 +345,10 @@ class AuthController extends Controller
             $user->save();
         }
 
+        if ($googleVerified && ! $user->hasVerifiedEmail()) {
+            $user->markEmailAsVerified();
+        }
+
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
@@ -336,5 +356,49 @@ class AuthController extends Controller
             'token_type' => 'Bearer',
             'user' => $user,
         ]);
+    }
+
+    // ==============================
+    // Confirmación del email
+    // ==============================
+
+    /** Reenvía el correo de confirmación al usuario con sesión. */
+    public function resendVerification(Request $request)
+    {
+        $user = $request->user();
+        if ($user->hasVerifiedEmail()) {
+            return response()->json(['message' => 'Tu email ya está confirmado']);
+        }
+
+        $this->sendVerificationEmail($user);
+
+        return response()->json(['message' => 'Te hemos enviado un correo para confirmar tu email'], 202);
+    }
+
+    /**
+     * Enlace del correo (se abre en el navegador, sin sesión). La firma de la
+     * URL (middleware signed) y el hash del email impiden confirmar otra cuenta
+     * o un email que ya no es el de la cuenta.
+     */
+    public function verifyEmail(Request $request, string $id, string $hash)
+    {
+        $user = User::find($id);
+        $valid = $user && hash_equals(sha1($user->getEmailForVerification()), $hash);
+
+        if ($valid && ! $user->hasVerifiedEmail()) {
+            $user->markEmailAsVerified();
+        }
+
+        return response()->view('auth.email-verified', ['valid' => $valid], $valid ? 200 : 403);
+    }
+
+    /** Un fallo del servicio de correo no impide registrarse ni cambiar el email. */
+    private function sendVerificationEmail(User $user): void
+    {
+        try {
+            $user->sendEmailVerificationNotification();
+        } catch (\Throwable $e) {
+            Log::warning('Verification email failed: '.$e->getMessage());
+        }
     }
 }

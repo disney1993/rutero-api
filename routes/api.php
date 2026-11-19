@@ -34,6 +34,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', [AuthController::class, 'userProfile']);
     Route::patch('/user', [AuthController::class, 'updateProfile']);
     Route::patch('/user/password', [AuthController::class, 'updatePassword']);
+    Route::post('/email/verification-notification', [AuthController::class, 'resendVerification'])->middleware('throttle:3,1');
     Route::patch('/user/avatar-color', [AuthController::class, 'updateAvatarColor']);
     Route::patch('/user/preferences', [AuthController::class, 'updatePreferences']);
     // Resumen / analytics / export propios; un admin puede pedir el de otro con ?user_id=.
