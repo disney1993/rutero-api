@@ -39,6 +39,8 @@ return [
     'client_id'     => env('GOOGLE_CLIENT_ID'),
     'client_secret' => env('GOOGLE_CLIENT_SECRET'),
     'redirect'      => env('GOOGLE_REDIRECT_URI'),
+    // Client ID de Android e iOS, separados por comas (login desde la app).
+    'mobile_client_ids' => env('GOOGLE_MOBILE_CLIENT_IDS'),
 ],
 
 

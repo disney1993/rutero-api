@@ -7,7 +7,6 @@ use App\Models\User;
 use App\Models\Vehicle;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\URL;
 use Laravel\Sanctum\Sanctum;
@@ -108,16 +107,22 @@ class EmailVerificationTest extends TestCase
         Notification::assertNotSentTo($verified, VerifyEmail::class);
     }
 
-    public function test_google_login_confirms_the_email_only_when_google_says_it_is_verified(): void
+    public function test_google_login_confirms_the_email(): void
     {
-        Http::fake(['https://oauth2.googleapis.com/tokeninfo*' => Http::sequence()
-            ->push(['email' => 'g1@example.test', 'sub' => '1', 'email_verified' => 'true'])
-            ->push(['email' => 'g2@example.test', 'sub' => '2', 'email_verified' => 'false'])]);
+        $this->fakeGoogleToken(['email' => 'g1@example.test']);
 
         $this->postJson('/api/auth/google/mobile', ['id_token' => 'token-1'])->assertOk();
-        $this->postJson('/api/auth/google/mobile', ['id_token' => 'token-2'])->assertOk();
 
         $this->assertTrue(User::where('email', 'g1@example.test')->first()->hasVerifiedEmail());
-        $this->assertFalse(User::where('email', 'g2@example.test')->first()->hasVerifiedEmail());
+    }
+
+    public function test_google_login_confirms_an_existing_unverified_password_account(): void
+    {
+        $user = User::factory()->unverified()->create(['email' => 'mixto@example.test']);
+        $this->fakeGoogleToken(['email' => 'mixto@example.test']);
+
+        $this->postJson('/api/auth/google/mobile', ['id_token' => 'token'])->assertOk();
+
+        $this->assertTrue($user->fresh()->hasVerifiedEmail());
     }
 }

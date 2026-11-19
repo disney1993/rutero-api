@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class AuthTest extends TestCase
@@ -192,13 +191,13 @@ class AuthTest extends TestCase
 
     public function test_google_account_cannot_change_email()
     {
-        Http::fake(["https://oauth2.googleapis.com/tokeninfo*" => Http::response([
+        $this->fakeGoogleToken([
             'email' => 'glock@example.test',
             'sub' => 'google-sub-lock-1',
             'given_name' => 'G',
             'family_name' => 'Lock',
             'picture' => 'http://example.com/pic.png',
-        ], 200)]);
+        ]);
 
         $gresp = $this->postJson('/api/auth/google/mobile', ['id_token' => 'fake-token-lock']);
         $gresp->assertStatus(200);
@@ -217,13 +216,13 @@ class AuthTest extends TestCase
 
     public function test_google_account_cannot_change_password()
     {
-        Http::fake(["https://oauth2.googleapis.com/tokeninfo*" => Http::response([
+        $this->fakeGoogleToken([
             'email' => 'gnopass@example.test',
             'sub' => 'google-sub-nopass-1',
             'given_name' => 'G',
             'family_name' => 'NoPass',
             'picture' => 'http://example.com/pic.png',
-        ], 200)]);
+        ]);
 
         $gresp = $this->postJson('/api/auth/google/mobile', ['id_token' => 'fake-token-nopass']);
         $token = $gresp->json('access_token');
@@ -449,14 +448,14 @@ class AuthTest extends TestCase
 
     public function test_google_mobile_creates_plain_user()
     {
-        Http::fake(["https://oauth2.googleapis.com/tokeninfo*" => Http::response([
+        $this->fakeGoogleToken([
             'email' => 'gdriver@example.test',
             'given_name' => 'GDriver',
             'family_name' => 'Test',
             'picture' => 'http://example.com/pic.png',
-        ], 200)]);
+        ]);
 
-        $gresp = $this->postJson('/api/auth/google/mobile', ['id_token' => 'fake-token']);
+        $gresp = $this->postJson('/api/auth/google/mobile', ['id_token' => 'any-token']);
         $gresp->assertStatus(200)->assertJsonStructure(['access_token', 'user']);
         $user = $gresp->json('user');
         $this->assertEquals('gdriver@example.test', $user['email']);

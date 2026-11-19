@@ -272,48 +272,29 @@ class AuthController extends Controller
             'id_token' => 'required|string',
         ]);
 
-        $idToken = $request->input('id_token');
-        // In testing, allow a fake token to bypass external Google verification
-        if (app()->environment('testing')) {
-            // If Http::fake is used in tests, this block won't run; this is a fallback
-            // for environments where the fake isn't applied correctly.
-            if ($idToken === 'fake-token') {
-                $data = [
-                    'email' => 'gdriver@example.test',
-                    'given_name' => 'GDriver',
-                    'family_name' => 'Test',
-                    'picture' => 'http://example.com/pic.png',
-                ];
-            } else {
-                // attempt regular verification in testing too
-                try {
-                    $resp = \Illuminate\Support\Facades\Http::get("https://oauth2.googleapis.com/tokeninfo", ['id_token' => $idToken]);
-                } catch (\Throwable $e) {
-                    return response()->json(['message' => 'Invalid id_token'], 401);
-                }
-
-                if (! $resp->ok()) {
-                    return response()->json(['message' => 'Invalid id_token'], 401);
-                }
-
-                $data = $resp->json();
-            }
-        } else {
-            // Verify token with Google using Http facade (testable)
-            try {
-                $resp = \Illuminate\Support\Facades\Http::get("https://oauth2.googleapis.com/tokeninfo", ['id_token' => $idToken]);
-            } catch (\Throwable $e) {
-                return response()->json(['message' => 'Invalid id_token'], 401);
-            }
-
-            if (! $resp->ok()) {
-                return response()->json(['message' => 'Invalid id_token'], 401);
-            }
-
-            $data = $resp->json();
+        $audiences = $this->googleAudiences();
+        if ($audiences === []) {
+            return response()->json(['message' => 'El inicio de sesión con Google no está configurado'], 503);
         }
-        if (! isset($data['email'])) {
-            return response()->json(['message' => 'Invalid token data'], 401);
+
+        try {
+            $resp = \Illuminate\Support\Facades\Http::get('https://oauth2.googleapis.com/tokeninfo', ['id_token' => $request->input('id_token')]);
+        } catch (\Throwable $e) {
+            return response()->json(['message' => 'Invalid id_token'], 401);
+        }
+        $data = $resp->ok() ? $resp->json() : null;
+
+        // tokeninfo comprueba la firma y la caducidad. Falta comprobar que el
+        // token se emitió para esta app (aud) y por Google (iss), y que el email
+        // es de quien entra: sin eso valdría un token de Google de cualquier
+        // otra app, o un email sin verificar, para entrar en la cuenta con ese email.
+        if (! is_array($data)
+            || ! in_array($data['aud'] ?? null, $audiences, true)
+            || ! in_array($data['iss'] ?? null, ['accounts.google.com', 'https://accounts.google.com'], true)
+            || (int) ($data['exp'] ?? 0) < time()
+            || ! filter_var($data['email_verified'] ?? false, FILTER_VALIDATE_BOOLEAN)
+            || empty($data['email'])) {
+            return response()->json(['message' => 'Invalid id_token'], 401);
         }
 
         $email = $data['email'];
@@ -390,6 +371,14 @@ class AuthController extends Controller
         }
 
         return response()->view('auth.email-verified', ['valid' => $valid], $valid ? 200 : 403);
+    }
+
+    /** Client ID de Google aceptados como "aud": el web y los de Android/iOS. */
+    private function googleAudiences(): array
+    {
+        $ids = [config('services.google.client_id'), ...explode(',', (string) config('services.google.mobile_client_ids'))];
+
+        return array_values(array_filter(array_map(fn ($id) => trim((string) $id), $ids)));
     }
 
     /** Un fallo del servicio de correo no impide registrarse ni cambiar el email. */
