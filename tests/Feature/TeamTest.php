@@ -139,16 +139,17 @@ class TeamTest extends TestCase
         $this->as($this->driver)->postJson('/api/driver/join-code', ['code' => 'ABCD1234'])->assertStatus(422);
     }
 
-    public function test_joining_a_month_code_adds_the_driver_to_the_team(): void
+    public function test_a_month_code_does_not_add_a_stranger_to_the_team(): void
     {
         $code = OwnerMonthCode::create([
             'owner_id' => $this->owner->id, 'code' => 'MONTH001', 'month' => now()->format('Y-m'),
             'type' => 'month', 'scope_key' => now()->format('Y-m'),
         ]);
 
-        $this->as($this->driver)->postJson('/api/driver/join-code', ['code' => $code->code])->assertOk();
+        $this->as($this->driver)->postJson('/api/driver/join-code', ['code' => $code->code])->assertForbidden();
 
-        $this->assertTrue(OwnerDriver::isActive($this->owner->id, $this->driver->id));
+        $this->assertFalse(OwnerDriver::isActive($this->owner->id, $this->driver->id));
+        $this->assertDatabaseMissing('driver_code_entries', ['driver_id' => $this->driver->id]);
     }
 
     public function test_owner_assigns_a_trip_and_the_driver_sees_it_without_any_code(): void
@@ -293,8 +294,9 @@ class TeamTest extends TestCase
         $this->getJson('/api/invitations/ZZZZ9999')->assertNotFound();
     }
 
-    public function test_joining_a_day_jornada_also_links_the_driver_to_the_team(): void
+    public function test_a_team_driver_can_use_tomorrows_day_code_today(): void
     {
+        OwnerDriver::activate($this->owner->id, $this->driver);
         $tomorrow = now('Europe/Madrid')->addDay()->toDateString();
         $code = OwnerMonthCode::create([
             'owner_id' => $this->owner->id, 'code' => 'DAYCODE1', 'month' => substr($tomorrow, 0, 7),
@@ -304,8 +306,6 @@ class TeamTest extends TestCase
         // Se puede compartir la víspera: el código de mañana ya sirve hoy.
         $this->as($this->driver)->postJson('/api/driver/join-code', ['code' => $code->code])
             ->assertOk()->assertJsonPath('type', 'day');
-
-        $this->assertTrue(OwnerDriver::isActive($this->owner->id, $this->driver->id));
     }
 
     public function test_jornada_codes_work_as_invitation_links(): void

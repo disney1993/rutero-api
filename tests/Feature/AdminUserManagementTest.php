@@ -142,6 +142,8 @@ class AdminUserManagementTest extends TestCase
         $code = $this->withHeader('Authorization', "Bearer $ownerToken")
             ->postJson('/api/owner/codes', ['month' => $month])->json('code');
 
+        // Los códigos solo sirven a conductores del equipo.
+        \App\Models\OwnerDriver::activate($ownerId, \App\Models\User::find($driverId));
         $this->app['auth']->forgetGuards();
         $this->withHeader('Authorization', "Bearer $driverToken")
             ->postJson('/api/driver/join-code', ['code' => $code, 'month' => $month])->assertStatus(200);

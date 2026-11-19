@@ -152,7 +152,7 @@ class JornadaTest extends TestCase
         $this->assertModelMissing($j2);
     }
 
-    public function test_joining_a_jornada_code_makes_the_driver_its_driver_and_team_member(): void
+    public function test_a_jornada_code_refuses_strangers_and_makes_a_team_member_its_driver(): void
     {
         $newcomer = User::factory()->create();
         $j = Jornada::createFor($this->owner, $this->day, ['driver_id' => null]);
@@ -160,22 +160,27 @@ class JornadaTest extends TestCase
 
         $this->getJson("/api/invitations/{$j->code}")->assertOk()->assertJsonPath('type', 'jornada')->assertJsonPath('valid_on', $this->day);
 
+        // Un código reenviado no mete a un desconocido en el equipo.
+        $this->as($newcomer)->postJson('/api/driver/join-code', ['code' => $j->code])->assertForbidden();
+        $this->assertFalse(OwnerDriver::isActive($this->owner->id, $newcomer->id));
+        $this->assertNull($j->fresh()->driver_id);
+
+        OwnerDriver::activate($this->owner->id, $newcomer);
         $this->as($newcomer)->postJson('/api/driver/join-code', ['code' => $j->code])->assertOk()
             ->assertJsonPath('type', 'jornada')->assertJsonPath('assigned', true);
 
-        $this->assertTrue(OwnerDriver::isActive($this->owner->id, $newcomer->id));
         $this->assertSame($newcomer->id, $j->fresh()->driver_id);
         $this->assertSame($newcomer->id, Ruta::find($ruta['id'])->driver_id);
     }
 
-    public function test_joining_a_jornada_that_already_has_a_driver_only_links_the_team(): void
+    public function test_joining_a_jornada_that_already_has_a_driver_does_not_reassign_it(): void
     {
         $newcomer = User::factory()->create();
+        OwnerDriver::activate($this->owner->id, $newcomer);
         $j = Jornada::createFor($this->owner, $this->day, ['driver_id' => $this->luis->id]);
 
         $this->as($newcomer)->postJson('/api/driver/join-code', ['code' => $j->code])->assertOk()->assertJsonPath('assigned', false);
 
-        $this->assertTrue(OwnerDriver::isActive($this->owner->id, $newcomer->id));
         $this->assertSame($this->luis->id, $j->fresh()->driver_id);
     }
 

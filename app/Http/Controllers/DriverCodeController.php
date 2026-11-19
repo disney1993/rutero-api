@@ -57,22 +57,34 @@ class DriverCodeController extends Controller
                 : 'Este código ya no es válido'], 422);
         }
 
+        if (! OwnerDriver::isActive($ownerCode->owner_id, $user->id)) {
+            return $this->notInTeam();
+        }
+
         $entry = DriverCodeEntry::firstOrCreate([
             'owner_month_code_id' => $ownerCode->id,
             'driver_id' => $user->id,
         ]);
 
-        // Unirse a una jornada (de mes o de día) vincula también al conductor
-        // con el equipo del propietario: así puede asignarle viajes después.
-        OwnerDriver::activate($ownerCode->owner_id, $user);
-
         return response()->json(['message' => 'Joined', 'type' => $ownerCode->isDay() ? 'day' : 'month', 'entry' => $entry]);
     }
 
     /**
-     * Unirse a una jornada: el conductor entra en el equipo del propietario y,
+     * Los códigos de jornada y de mes se comparten y se pueden reenviar: solo
+     * sirven a quien ya está en el equipo. Para entrar en él hace falta una
+     * invitación (email o enlace de un solo uso) que el conductor acepta.
+     */
+    private function notInTeam()
+    {
+        return response()->json([
+            'message' => 'Este código es para conductores del equipo. Pide al propietario que te invite a su equipo.',
+        ], 403);
+    }
+
+    /**
+     * Unirse a una jornada (solo conductores del equipo):
      * si la jornada no tiene conductor, pasa a serlo (junto con sus viajes
-     * pendientes sin asignar). Si ya tiene otro, solo se une al equipo.
+     * pendientes sin asignar). Si ya tiene otro, no cambia nada.
      */
     private function joinJornada(Jornada $jornada, $user)
     {
@@ -83,7 +95,9 @@ class DriverCodeController extends Controller
             return response()->json(['message' => 'Este código de jornada ya no es válido: era para el día indicado'], 422);
         }
 
-        OwnerDriver::activate($jornada->owner_id, $user);
+        if (! OwnerDriver::isActive($jornada->owner_id, $user->id)) {
+            return $this->notInTeam();
+        }
 
         $assigned = false;
         if ($jornada->driver_id === null || $jornada->driver_id === $user->id) {

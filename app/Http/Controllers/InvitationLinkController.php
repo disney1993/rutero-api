@@ -23,10 +23,11 @@ use Illuminate\Http\Response;
 /**
  * Enlaces de invitación: https://<api>/i/{código}.
  *
- * Sirven para los dos tipos de código, que se canjean igual (driver/join-code)
- * y en ambos casos vinculan al conductor con el equipo del propietario:
- * - team: invitación al equipo (un solo uso, caduca a los 7 días).
- * - day / month: código de una jornada (un día) o de un mes.
+ * Sirven para los dos tipos de código, que se canjean igual (driver/join-code):
+ * - team: invitación al equipo (un solo uso, caduca a los 7 días). Es la
+ *   única forma de entrar en el equipo con un código.
+ * - day / month: código de una jornada (un día) o de un mes. Solo sirve a
+ *   quien ya es del equipo.
  *
  * La página web intenta abrir la app (rutero://invite/{código}); si no está
  * instalada, ofrece descargarla y muestra el código para escribirlo a mano. El

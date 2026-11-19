@@ -48,6 +48,9 @@ class OwnerCodeTest extends TestCase
         // between users within one test requires forgetting guards first.
         $this->app['auth']->forgetGuards();
 
+        // Los códigos solo sirven a conductores del equipo.
+        \App\Models\OwnerDriver::activate($ownerId, \App\Models\User::find($dreg->json('user.id')));
+
         $join = $this->withHeaders(['Authorization' => 'Bearer ' . $dtoken])->postJson('/api/driver/join-code', ['code' => $code, 'month' => $month]);
         $join->assertStatus(200)->assertJson(['message' => 'Joined']);
 
@@ -87,6 +90,8 @@ class OwnerCodeTest extends TestCase
         $dtoken = $dreg->json('access_token');
         $driverId = $dreg->json('user.id');
 
+        // Los códigos solo sirven a conductores del equipo.
+        \App\Models\OwnerDriver::activate($ownerId, \App\Models\User::find($driverId));
         $this->app['auth']->forgetGuards();
         $this->withHeaders(['Authorization' => 'Bearer ' . $dtoken])->postJson('/api/driver/join-code', ['code' => $code, 'month' => $month])->assertStatus(200);
 
@@ -172,6 +177,8 @@ class OwnerCodeTest extends TestCase
         ]);
         $dtoken = $dreg->json('access_token');
 
+        // Los códigos solo sirven a conductores del equipo.
+        \App\Models\OwnerDriver::activate($ownerId, \App\Models\User::find($dreg->json('user.id')));
         $this->app['auth']->forgetGuards();
         $this->withHeaders(['Authorization' => 'Bearer ' . $dtoken])
             ->postJson('/api/driver/join-code', ['code' => $code])
